@@ -7,3 +7,5 @@ openai
 requests
 python-dotenv
 cartesia
+weave
+Pillow

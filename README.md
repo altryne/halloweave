@@ -1,69 +1,60 @@
-# Halloween Camera Project
+# Halloweave 🎃
 
-This project uses a Raspberry Pi camera to detect motion and interact with OpenAI and Cartesia APIs.
+An AI-powered Halloween decoration that detects motion, analyzes costumes, and provides spooky greetings!
 
-## Installation
+## 🔗 Project Links
 
-### 1. Update and upgrade your Raspberry Pi:
+- GitHub Repository: [https://github.com/altryne/halloweave](https://github.com/altryne/halloweave)
+- Project Announcement: [Twitter Post](https://x.com/altryne/status/1840724089981251989)
 
-## Troubleshooting
+## 🚀 Features
 
-If you encounter issues with the camera, try the following:
+- Motion detection using OpenCV
+- Costume analysis with Gemini AI
+- Spooky text-to-speech using Cartesia API
+- FastAPI web server for easy integration and monitoring
+- Experiment tracking with Weights & Biases (Weave)
 
-1. Ensure the camera is properly connected to the Raspberry Pi.
+## 📋 Prerequisites
 
-2. Check if the camera device exists:
-   ```bash
-   ls -l /dev/video0
+- Python 3.8+
+- OpenCV
+- PyAudio
+- FastAPI
+- Uvicorn
+- Pillow (PIL)
+- Weave
+- Cartesia
+- Google Generative AI
+
+## 🛠 Installation
+
+1. Clone the repository:
    ```
-   This should show the device file if it exists.
-
-3. Check the permissions of the camera device:
-   ```bash
-   ls -l /dev/video0
-   ```
-   Ensure that the current user has read and write permissions.
-
-4. If the permissions are incorrect, you can change them:
-   ```bash
-   sudo chmod 666 /dev/video0
-   ```
-
-5. Check if the v4l2 driver is loaded:
-   ```bash
-   lsmod | grep v4l2
-   ```
-   If it's not listed, you can try loading it:
-   ```bash
-   sudo modprobe bcm2835-v4l2
+   git clone https://github.com/altryne/halloweave.git
+   cd halloweave
    ```
 
-6. Check the camera capabilities:
-   ```bash
-   v4l2-ctl --all -d /dev/video0
+2. Install the required packages:
    ```
-   This will show detailed information about the camera.
-
-7. If you're using a Raspberry Pi camera module, ensure it's enabled in raspi-config:
-   ```bash
-   sudo raspi-config
-   ```
-   Navigate to "Interfacing Options" > "Camera" and select "Yes" to enable the camera.
-
-8. If you're using a USB camera, try unplugging and replugging it, then check dmesg for any error messages:
-   ```bash
-   dmesg | tail
+   pip install -r requirements.txt
    ```
 
-9. Ensure that the user running the script (usually 'pi') is part of the 'video' group:
-   ```bash
-   sudo usermod -a -G video $USER
+3. Set up your environment variables in a `.env` file:
    ```
-   Log out and log back in for the changes to take effect.
+   GEMINI_API_KEY=your_gemini_api_key
+   CARTESIA_API_KEY=your_cartesia_api_key
+   WANDB_API_KEY=your_wandb_api_key
+   ```
 
-10. If issues persist, check the system logs for any camera-related errors:
-    ```bash
-    journalctl -b | grep -i camera
-    ```
+## 🎯 Usage
 
-If you're still experiencing issues after trying these steps, please provide the output of these commands to help further diagnose the problem.
+Run the main application:
+```
+python main.py
+```
+
+## 📷 Camera Setup
+
+Ensure your camera is correctly configured and accessible by OpenCV. You may need to adjust the camera index (`0` by default) in the code if your system has multiple cameras.
+

@@ -1,17 +1,34 @@
 import os
 import google.generativeai as genai
+from PIL import Image
+from google.api_core import exceptions, retry
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import weave
 from dotenv import load_dotenv
+import tempfile
 
 load_dotenv()
 
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 @weave.op()
-def upload_to_gemini(path, mime_type=None):
-    file = genai.upload_file(path, mime_type=mime_type)
-    print(f"Uploaded file '{file.display_name}' as: {file.uri}")
-    return file
+def upload_to_gemini(pil_image, mime_type=None):
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+        temp_filename = temp_file.name
+    
+    # Save the PIL image to the temporary file
+    pil_image.save(temp_filename, format="PNG")
+    
+    try:
+        # Upload the temporary file using its path
+        file = genai.upload_file(temp_filename, mime_type=mime_type or "image/png")
+        
+        print(f"Uploaded file '{file.display_name}' as: {file.uri}")
+        return file
+    finally:
+        # Clean up the temporary file
+        os.unlink(temp_filename)
 
 generation_config = {
     "temperature": 1.2,
@@ -27,20 +44,17 @@ model = genai.GenerativeModel(
 )
 
 @weave.op
-def gemini_chat(image_path):
-    file = upload_to_gemini(image_path, mime_type="image/jpeg")
-    
-    chat_session = model.start_chat(
-        history=[
-            {
-                "role": "user",
-                "parts": [
-                    file,
-                    "You're part of a system of a smart halloween decoration hidden inside a small funny looking skeleton. You will be fed images from the camera input and you'll provide a funny, child appropriate greeting using their costume as reference. If you have an image with multiple kids, you will try to greet the main ones (up to 3) by combining them into one sentence (\"oh, look at spiderman and hulk, the avengers are on my porch!\") \n\nDo not say anything else besides the greeting itself, make sure it's funny and appropriate! \nLook at this image and answer with a few sentences greeting to the kid/kids. Be a little spooky, talk about who enters my door, but generally kind and funny.",
-                ],
-            },
-        ]
-    )
-
-    response = chat_session.send_message("Greet the kids in the image.")
+@retry.Retry(predicate=retry.if_exception_type(exceptions.ResourceExhausted))
+def gemini_chat(pil_image):
+    file = upload_to_gemini(pil_image)
+    response = model.generate_content([
+        "You're part of a system of a smart halloween decoration hidden inside a small funny looking skeleton. You will be fed images from the camera input and you'll provide a funny, child appropriate greeting using their costume as reference. If you have an image with multiple kids, you will try to greet the main ones (up to 3) by combining them into one sentence (\"oh, look at spiderman and hulk, the avengers are on my porch! Would you like a trick or a treat?\") \n\nDo not say anything else besides the greeting itself, make sure it's funny and appropriate! \nLook at this image and answer with a few sentences greeting to the kid/kids. Be a little spooky, talk about who enters my door, but generally kind and funny and say at least two or three sentences.",
+        file,
+    ],
+    safety_settings={
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH
+    })
     return response.text

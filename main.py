@@ -4,6 +4,7 @@ import time
 from contextlib import asynccontextmanager
 from threading import Lock, Thread
 from queue import Queue
+from io import BytesIO
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
@@ -11,6 +12,7 @@ import uvicorn
 
 import cv2
 import pyaudio
+from PIL import Image
 
 from cartesia import AsyncCartesia
 import weave
@@ -30,7 +32,7 @@ camera_lock = Lock()
 frame_queue = Queue(maxsize=10)  # Buffer for frames
 motion_detected = False
 last_motion_time = 0
-
+audio_playing = False
 
 # Choose the chat model to use
 CHAT_MODEL = "gemini"  # Options: "gemini", "openai", "openrouter"
@@ -89,13 +91,13 @@ def video_feed():
     return StreamingResponse(gen_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 def motion_detector():
-    global motion_detected, last_motion_time
+    global motion_detected, last_motion_time, audio_playing
     prev_frame = None
     motion_threshold = 5000  # Adjust this value to change motion sensitivity
-    cooldown = 2  # Cooldown period in seconds
+    cooldown = 5  # Cooldown period in seconds
 
     while True:
-        if not frame_queue.empty():
+        if not frame_queue.empty() and not audio_playing:
             frame = frame_queue.get()
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             gray = cv2.GaussianBlur(gray, (21, 21), 0)
@@ -115,10 +117,9 @@ def motion_detector():
                     if current_time - last_motion_time > cooldown:
                         motion_detected = True
                         last_motion_time = current_time
-                        # Capture and process the motion event
-                        image_path = 'captured.jpg'
-                        cv2.imwrite(image_path, frame)
-                        asyncio.run(process_motion(image_path))
+                        # Convert the frame to PIL Image
+                        pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        asyncio.run(process_motion(pil_image))
                     break
 
             prev_frame = gray
@@ -134,19 +135,23 @@ def check_motion():
     return {"motion": False}
 
 @weave.op
-async def process_motion(image_path):
+async def process_motion(pil_image):
+    await stream_text_to_speech("oooh, who do we have here?")
     if CHAT_MODEL == "gemini":
-        response = gemini_chat(image_path)
+        response = gemini_chat(pil_image)
     elif CHAT_MODEL == "openai":
-        response = openai_chat(image_path)
+        response = openai_chat(pil_image)
     elif CHAT_MODEL == "openrouter":
-        response = openrouter_chat(image_path)
+        response = openrouter_chat(pil_image)
     else:
         raise ValueError(f"Unknown chat model: {CHAT_MODEL}")
     
     await stream_text_to_speech(response)
+    
+    return response
 
 async def stream_text_to_speech(text):
+    global audio_playing
     client = AsyncCartesia(api_key=os.environ.get("CARTESIA_API_KEY"))
     ws = await client.tts.websocket()
     ctx = ws.context()
@@ -164,32 +169,34 @@ async def stream_text_to_speech(text):
         "sample_rate": rate,
     }
 
-    await ctx.send(
-        model_id=model_id,
-        transcript=text,
-        voice_id=voice_id,
-        continue_=False,
-        output_format=output_format,
-    )
+    try:
+        audio_playing = True  # Set flag to True before starting audio playback
+        await ctx.send(
+            model_id=model_id,
+            transcript=text,
+            voice_id=voice_id,
+            continue_=False,
+            output_format=output_format,
+        )
 
-    async for output in ctx.receive():
-        buffer = output["audio"]
-        if not stream_audio:
-            stream_audio = p.open(
-                format=pyaudio.paFloat32,
-                channels=1,
-                rate=rate,
-                output=True
-            )
-        stream_audio.write(buffer)
-
-    if stream_audio:
-        stream_audio.stop_stream()
-        stream_audio.close()
-    p.terminate()
-
-    await ws.close()
-    await client.close()
+        async for output in ctx.receive():
+            buffer = output["audio"]
+            if not stream_audio:
+                stream_audio = p.open(
+                    format=pyaudio.paFloat32,
+                    channels=1,
+                    rate=rate,
+                    output=True
+                )
+            stream_audio.write(buffer)
+    finally:
+        if stream_audio:
+            stream_audio.stop_stream()
+            stream_audio.close()
+        p.terminate()
+        await ws.close()
+        await client.close()
+        audio_playing = False  # Set flag back to False after audio playback is complete
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
