@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+opencv-python
+pyaudio
+google-generativeai
+openai
+requests
+python-dotenv
+cartesia
