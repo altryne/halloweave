@@ -165,7 +165,7 @@ async def stream_text_to_speech(text):
     model_id = "sonic-english"
     output_format = {
         "container": "raw",
-        "encoding": "pcm_f32le",
+        "encoding": "pcm_s16le",  # Changed to 16-bit PCM for better compatibility
         "sample_rate": rate,
     }
 
@@ -179,16 +179,22 @@ async def stream_text_to_speech(text):
             output_format=output_format,
         )
 
-        async for output in ctx.receive():
-            buffer = output["audio"]
-            if not stream_audio:
-                stream_audio = p.open(
-                    format=pyaudio.paFloat32,
-                    channels=1,
-                    rate=rate,
-                    output=True
-                )
-            stream_audio.write(buffer)
+        # Buffer to accumulate audio data
+        audio_buffer = b""
+
+        if audio_buffer:
+        stream_audio = p.open(
+            format=pyaudio.paInt16,  # Changed to match the new encoding
+            channels=1,
+            rate=rate,
+            output=True,
+            frames_per_buffer=1024,  # Adjust buffer size for smoother playback
+        )
+        # Increase volume by multiplying the audio data
+        volume_multiplier = 2.0  # Adjust this value to increase or decrease volume
+        audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
+        audio_data = (audio_data * volume_multiplier).astype(np.int16)
+        stream_audio.write(audio_data.tobytes())
     finally:
         if stream_audio:
             stream_audio.stop_stream()
@@ -197,6 +203,9 @@ async def stream_text_to_speech(text):
         await ws.close()
         await client.close()
         audio_playing = False  # Set flag back to False after audio playback is complete
+
+# Add this import at the top of the file
+import numpy as np
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
