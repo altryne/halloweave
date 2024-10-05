@@ -242,7 +242,7 @@ async def stream_text_to_speech(text):
 
     try:
         audio_playing = True  # Set flag to True before starting audio playback
-        skeleton.start_mouth_movement()  # Start moving the skeleton's mouth
+        
         await ctx.send(
             model_id=model_id,
             transcript=text,
@@ -256,7 +256,7 @@ async def stream_text_to_speech(text):
             if audio_buffer:
                 # Debugging: Print the type and keys of audio_buffer
                 # Remove or comment out this line in production
-                # print(f"Received audio_buffer: {audio_buffer}")
+                print(f"Received audio_buffer: {audio_buffer}")
 
                 # Determine the structure of audio_buffer and extract audio bytes accordingly
                 audio_data_bytes = None
@@ -269,10 +269,8 @@ async def stream_text_to_speech(text):
                         # For example, check if the first element is bytes
                         if len(audio_buffer) > 0 and isinstance(list(audio_buffer.values())[0], bytes):
                             audio_data_bytes = list(audio_buffer.values())[0]
-                elif isinstance(audio_buffer, (tuple, list)):
-                    # If audio_buffer is a tuple or list, assume the first element is bytes
-                    if len(audio_buffer) > 0 and isinstance(audio_buffer[0], bytes):
-                        audio_data_bytes = audio_buffer[0]
+                elif isinstance(audio_buffer, (tuple, list)) and len(audio_buffer) > 0 and isinstance(audio_buffer[0], bytes):
+                    audio_data_bytes = audio_buffer[0]
                 elif isinstance(audio_buffer, bytes):
                     # If audio_buffer is bytes, use it directly
                     audio_data_bytes = audio_buffer
@@ -299,6 +297,12 @@ async def stream_text_to_speech(text):
                     audio_data = np.frombuffer(audio_data_bytes, dtype=np.int16)
                     audio_data = (audio_data * volume_multiplier).astype(np.int16)
                     stream_audio.write(audio_data.tobytes())
+
+                    # Calculate amplitude and control mouth movement
+                    amplitude = np.abs(audio_data).mean()
+                    duration = min(max(0.01, amplitude / 30000), 0.15)  # Scale duration dynamically
+                    skeleton.dynamic_mouth_movement(duration)  # Dynamic mouth movement based on amplitude
+
                 except Exception as e:
                     print(f"Error processing audio data: {e}")
     except Exception as e:
@@ -386,6 +390,11 @@ def process_image_with_gemini(pil_image):
 # Update the handle_wake_word function for regular mode
 async def handle_wake_word():
     global camera
+
+    print("Wake word detected! Taking a picture...")
+    
+    pil_image = camera.capture_image()
+
     #play sound from sounds directory using pyaudio
     def play_sound():
         p = pyaudio.PyAudio()
@@ -399,9 +408,7 @@ async def handle_wake_word():
 
     sound_thread = threading.Thread(target=play_sound)
     sound_thread.start()
-    print("Wake word detected! Taking a picture...")
     
-    pil_image = camera.capture_image()
     
     if pil_image is not None:
         if CHAT_MODEL == "gemini":

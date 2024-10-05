@@ -10,10 +10,9 @@ except ImportError:
 
 class SkeletonControl:
     def __init__(self):
-        # Set up GPIO pins
-        self.eyes_pin = 17  # Change this to the actual GPIO pin for eyes
-        self.mouth_pin = 4  # Change this to the actual GPIO pin for mouth
-        self.body_pin = 27  # Change this to the actual GPIO pin for body
+        self.eyes_pin = 17
+        self.mouth_pin = 4
+        self.body_pin = 27
 
         if ON_RASPBERRY_PI:
             GPIO.setmode(GPIO.BCM)
@@ -49,15 +48,19 @@ class SkeletonControl:
             self.mouth_thread.join()
 
     def _move_mouth(self):
+        """Default mouth movement."""
         while self.mouth_moving:
-            if ON_RASPBERRY_PI:
-                GPIO.output(self.mouth_pin, GPIO.HIGH)
-                time.sleep(0.1)
-                GPIO.output(self.mouth_pin, GPIO.LOW)
-                time.sleep(0.1)
-            else:
-                print("Mouth moving")
-                time.sleep(0.2)
+            self.dynamic_mouth_movement(0.1)  # Default interval for basic movement
+
+    def dynamic_mouth_movement(self, duration):
+        """Control the mouth with dynamic timing based on audio amplitude."""
+        if ON_RASPBERRY_PI:
+            GPIO.output(self.mouth_pin, GPIO.HIGH)
+            time.sleep(duration)
+            GPIO.output(self.mouth_pin, GPIO.LOW)
+        else:
+            print(f"Mouth moving for {duration} seconds")
+            time.sleep(duration)
 
     def start_body_movement(self):
         self.body_moving = True
