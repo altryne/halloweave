@@ -1,6 +1,8 @@
 import os
 import asyncio
 import time
+import struct
+import threading
 from contextlib import asynccontextmanager
 from threading import Lock, Thread
 from queue import Queue
@@ -28,7 +30,6 @@ from openrouter import openrouter_chat
 # Import Porcupine and PvRecorder
 import pvporcupine
 from pvrecorder import PvRecorder
-import struct
 
 load_dotenv()
 
@@ -50,6 +51,8 @@ recorder = None
 # Flag to enable/disable motion detection
 ENABLE_MOTION_DETECTION = False
 
+app = FastAPI()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global camera, porcupine, recorder
@@ -57,36 +60,48 @@ async def lifespan(app: FastAPI):
     weave.init('altryne-halloween-2024')
     if not camera.isOpened():
         raise RuntimeError("Could not open camera")
-    
+
     # Initialize Porcupine
     access_key = os.getenv("PICOVOICE_ACCESS_KEY")
-    keyword_path = "path/to/trick-or-treat_en_raspberry-pi_v2_2_0.ppn"  # Update this path
+    if not access_key:
+        raise RuntimeError("PICOVOICE_ACCESS_KEY not found in environment variables.")
+
+    import platform
+    if platform.system() == "Darwin":  # Mac OS
+        keyword_path = "./porcupine_models/trick-or-treat_en_mac_v3_0_0.ppn"
+    elif platform.system() == "Linux" and platform.machine().startswith("arm"):  # Raspberry Pi
+        keyword_path = "./porcupine_models/trick-or-treat_en_raspberry-pi_v2_2_0.ppn"
+    else:
+        raise RuntimeError("Unsupported platform for wake word detection")
     porcupine = pvporcupine.create(access_key=access_key, keyword_paths=[keyword_path])
-    
+
     # Initialize PvRecorder
     recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
-    
+    recorder.start()
+
     # Start frame capture in a separate thread
     capture_thread = Thread(target=capture_frames, daemon=True)
     capture_thread.start()
-    
+
     # Start motion detection in a separate thread only if enabled
     if ENABLE_MOTION_DETECTION:
         motion_thread = Thread(target=motion_detector, daemon=True)
         motion_thread.start()
-    
+
     # Start wake word detection in a separate thread
     wake_word_thread = Thread(target=wake_word_detector, daemon=True)
     wake_word_thread.start()
-    
-    yield
-    
-    if camera:
-        camera.release()
-    if porcupine:
-        porcupine.delete()
-    if recorder:
-        recorder.stop()
+
+    try:
+        yield
+    finally:
+        if camera:
+            camera.release()
+        if porcupine:
+            porcupine.delete()
+        if recorder:
+            recorder.stop()
+            recorder.delete()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -110,9 +125,9 @@ def gen_frames():
         if not frame_queue.empty():
             frame = frame_queue.get()
             ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
+            frame_bytes = buffer.tobytes()
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         else:
             time.sleep(0.01)
 
@@ -166,7 +181,7 @@ def check_motion():
 
 @weave.op
 async def process_motion(pil_image):
-    await stream_text_to_speech("oooh, who do we have here?")
+    await stream_text_to_speech("Oooh, who do we have here?")
     if CHAT_MODEL == "gemini":
         response = gemini_chat(pil_image)
     elif CHAT_MODEL == "openai":
@@ -175,9 +190,8 @@ async def process_motion(pil_image):
         response = openrouter_chat(pil_image)
     else:
         raise ValueError(f"Unknown chat model: {CHAT_MODEL}")
-    
+
     await stream_text_to_speech(response)
-    
     return response
 
 async def stream_text_to_speech(text):
@@ -209,22 +223,58 @@ async def stream_text_to_speech(text):
             output_format=output_format,
         )
 
-        # Buffer to accumulate audio data
-        audio_buffer = b""
+        # Iterate over the async generator to receive audio data
+        async for audio_buffer in ctx.receive():
+            if audio_buffer:
+                # Debugging: Print the type and keys of audio_buffer
+                # Remove or comment out this line in production
+                # print(f"Received audio_buffer: {audio_buffer}")
 
-        if audio_buffer:
-            stream_audio = p.open(
-                format=pyaudio.paInt16,  # Changed to match the new encoding
-                channels=1,
-                rate=rate,
-                output=True,
-                frames_per_buffer=1024,  # Adjust buffer size for smoother playback
-            )
-            # Increase volume by multiplying the audio data
-            volume_multiplier = 2.0  # Adjust this value to increase or decrease volume
-            audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
-            audio_data = (audio_data * volume_multiplier).astype(np.int16)
-            stream_audio.write(audio_data.tobytes())
+                # Determine the structure of audio_buffer and extract audio bytes accordingly
+                audio_data_bytes = None
+
+                if isinstance(audio_buffer, dict):
+                    # Check if 'data' key exists
+                    audio_data_bytes = audio_buffer.get('data')
+                    if not audio_data_bytes:
+                        # If 'data' key does not exist, check other possible keys or handle accordingly
+                        # For example, check if the first element is bytes
+                        if len(audio_buffer) > 0 and isinstance(list(audio_buffer.values())[0], bytes):
+                            audio_data_bytes = list(audio_buffer.values())[0]
+                elif isinstance(audio_buffer, (tuple, list)):
+                    # If audio_buffer is a tuple or list, assume the first element is bytes
+                    if len(audio_buffer) > 0 and isinstance(audio_buffer[0], bytes):
+                        audio_data_bytes = audio_buffer[0]
+                elif isinstance(audio_buffer, bytes):
+                    # If audio_buffer is bytes, use it directly
+                    audio_data_bytes = audio_buffer
+                else:
+                    print("Unknown audio_buffer format.")
+                    continue
+
+                if not audio_data_bytes:
+                    # If unable to extract bytes, skip processing
+                    print("No audio bytes found in audio_buffer. Skipping...")
+                    continue
+
+                if not stream_audio:
+                    stream_audio = p.open(
+                        format=pyaudio.paInt16,  # Changed to match the new encoding
+                        channels=1,
+                        rate=rate,
+                        output=True,
+                        frames_per_buffer=1024,  # Adjust buffer size for smoother playback
+                    )
+                try:
+                    # Increase volume by multiplying the audio data
+                    volume_multiplier = 2.0  # Adjust this value to increase or decrease volume
+                    audio_data = np.frombuffer(audio_data_bytes, dtype=np.int16)
+                    audio_data = (audio_data * volume_multiplier).astype(np.int16)
+                    stream_audio.write(audio_data.tobytes())
+                except Exception as e:
+                    print(f"Error processing audio data: {e}")
+    except Exception as e:
+        print(f"Error during text-to-speech: {e}")
     finally:
         if stream_audio:
             stream_audio.stop_stream()
@@ -235,35 +285,27 @@ async def stream_text_to_speech(text):
         audio_playing = False  # Set flag back to False after audio playback is complete
 
 def wake_word_detector():
-    global recorder, porcupine, motion_detected, last_motion_time, audio_playing
-    print("Listening for wake word 'trick or treat'...")
-    recorder.start()
-
+    global porcupine, recorder
     try:
         while True:
             pcm = recorder.read()
-            result = porcupine.process(struct.unpack_from("h" * porcupine.frame_length, bytes(pcm)))
-            
-            if result >= 0 and not audio_playing:
+            result = porcupine.process(pcm)
+            if result >= 0:
                 print("Wake word detected!")
-                recorder.stop()
-                
-                # Trigger the actions
-                current_time = time.time()
-                if current_time - last_motion_time > 5:  # 5-second cooldown
-                    last_motion_time = current_time
-                    if not frame_queue.empty():
-                        frame = frame_queue.get()
-                        pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                        asyncio.run(process_motion(pil_image))
-                
-                # Reset for next detection
-                time.sleep(2)
-                recorder.start()
-                print("Listening for wake word 'trick or treat'...")
-            
+                # Add your wake word detection logic here
+                asyncio.run(handle_wake_word())
     except KeyboardInterrupt:
-        print("Stopping wake word detection...")
+        print("Wake word detection stopped.")
+    except Exception as e:
+        print(f"Error in wake word detector: {e}")
+
+async def handle_wake_word():
+    # take a picture
+    # run the chat model
+    # stream the response to the user
+    
+    await stream_text_to_speech("Hello! How can I assist you today?")
+    # Add additional wake word handling logic here
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)

@@ -1,0 +1,1 @@
+# add a porcupine model for your platform from https://console.picovoice.com/dashboard/python/porcupine/settings/keys

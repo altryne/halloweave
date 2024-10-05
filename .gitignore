@@ -21,3 +21,6 @@ __pycache__
 *.webp
 *.svg
 *.ico
+
+__pycache__
+.DS_Store
