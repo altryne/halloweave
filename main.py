@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 import uvicorn
 
-import cv2
 import pyaudio
 from PIL import Image
 import numpy as np
@@ -30,6 +29,9 @@ from openrouter import openrouter_chat
 # Import Porcupine and PvRecorder
 import pvporcupine
 from pvrecorder import PvRecorder
+
+# Add this import at the top of the file, with the other imports
+from camera import get_camera
 
 load_dotenv()
 
@@ -56,7 +58,9 @@ app = FastAPI()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global camera, porcupine, recorder
-    camera = cv2.VideoCapture(0)
+    # Replace the existing camera initialization with:
+    camera = get_camera()
+    
     weave.init('altryne-halloween-2024')
     if not camera.isOpened():
         raise RuntimeError("Could not open camera")
@@ -300,12 +304,27 @@ def wake_word_detector():
         print(f"Error in wake word detector: {e}")
 
 async def handle_wake_word():
-    # take a picture
-    # run the chat model
-    # stream the response to the user
+    global camera
+    print("Wake word detected! Taking a picture...")
     
-    await stream_text_to_speech("Hello! How can I assist you today?")
-    # Add additional wake word handling logic here
+    # Capture an image (now returns a PIL Image directly)
+    pil_image = camera.capture_image()
+    
+    if pil_image is not None:
+        # Process the image with the chat model
+        if CHAT_MODEL == "gemini":
+            response = gemini_chat(pil_image)
+        elif CHAT_MODEL == "openai":
+            response = openai_chat(pil_image)
+        elif CHAT_MODEL == "openrouter":
+            response = openrouter_chat(pil_image)
+        else:
+            response = "I'm sorry, but I couldn't process the image at the moment."
+        
+        # Stream the response to the user
+        await stream_text_to_speech(response)
+    else:
+        await stream_text_to_speech("I'm sorry, but I couldn't take a picture at the moment.")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
