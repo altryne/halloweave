@@ -15,6 +15,7 @@ import uvicorn
 import pyaudio
 from PIL import Image
 import numpy as np
+import cv2
 
 from cartesia import AsyncCartesia
 import weave
@@ -31,7 +32,14 @@ import pvporcupine
 from pvrecorder import PvRecorder
 
 # Add this import at the top of the file, with the other imports
-from camera import get_camera
+from camera_module import Camera, get_camera
+
+# Add these imports at the top of the file
+# from livekit_agent import initialize_livekit_agent, HalloweenAgent
+# from livekit import rtc
+import json
+import openai
+from skeleton_control import SkeletonControl
 
 load_dotenv()
 
@@ -53,11 +61,19 @@ recorder = None
 # Flag to enable/disable motion detection
 ENABLE_MOTION_DETECTION = False
 
+# Add these global variables
+CONVERSATION_MODE = "regular"  # Options: "regular", "live"
+livekit_room = None
+livekit_agent = None
+
+# Add this global variable
+skeleton = None
+
 app = FastAPI()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global camera, porcupine, recorder
+    global camera, porcupine, recorder, skeleton
     # Replace the existing camera initialization with:
     camera = get_camera()
     
@@ -83,6 +99,9 @@ async def lifespan(app: FastAPI):
     recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
     recorder.start()
 
+    # Initialize skeleton control
+    skeleton = SkeletonControl()
+
     # Start frame capture in a separate thread
     capture_thread = Thread(target=capture_frames, daemon=True)
     capture_thread.start()
@@ -106,6 +125,10 @@ async def lifespan(app: FastAPI):
         if recorder:
             recorder.stop()
             recorder.delete()
+        if CONVERSATION_MODE == "live" and livekit_room:
+            await livekit_room.disconnect()
+        if skeleton:
+            skeleton.cleanup()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -117,8 +140,8 @@ def capture_frames():
     global camera, frame_queue
     while True:
         with camera_lock:
-            success, frame = camera.read()
-        if success:
+            frame = camera.capture_image()  # Use capture_frame() instead of read()
+        if frame is not None:
             if frame_queue.full():
                 frame_queue.get()  # Remove oldest frame if queue is full
             frame_queue.put(frame)
@@ -128,10 +151,10 @@ def gen_frames():
     while True:
         if not frame_queue.empty():
             frame = frame_queue.get()
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame_bytes = buffer.tobytes()
+            # Assuming frame is already in the correct format (JPEG bytes)
+            # If not, you may need to convert it here
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
         else:
             time.sleep(0.01)
 
@@ -148,7 +171,9 @@ def motion_detector():
     while True:
         if not frame_queue.empty() and not audio_playing:
             frame = frame_queue.get()
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # Assuming frame is a PIL Image, convert it to numpy array for OpenCV operations
+            frame_np = np.array(frame)
+            gray = cv2.cvtColor(frame_np, cv2.COLOR_RGB2GRAY)
             gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
             if prev_frame is None:
@@ -166,9 +191,8 @@ def motion_detector():
                     if current_time - last_motion_time > cooldown:
                         motion_detected = True
                         last_motion_time = current_time
-                        # Convert the frame to PIL Image
-                        pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                        asyncio.run(process_motion(pil_image))
+                        # frame is already a PIL Image, so no need to convert
+                        asyncio.run(process_motion(frame))
                     break
 
             prev_frame = gray
@@ -199,7 +223,7 @@ async def process_motion(pil_image):
     return response
 
 async def stream_text_to_speech(text):
-    global audio_playing
+    global audio_playing, skeleton
     client = AsyncCartesia(api_key=os.environ.get("CARTESIA_API_KEY"))
     ws = await client.tts.websocket()
     ctx = ws.context()
@@ -219,6 +243,7 @@ async def stream_text_to_speech(text):
 
     try:
         audio_playing = True  # Set flag to True before starting audio playback
+        skeleton.start_mouth_movement()  # Start moving the skeleton's mouth
         await ctx.send(
             model_id=model_id,
             transcript=text,
@@ -271,7 +296,7 @@ async def stream_text_to_speech(text):
                     )
                 try:
                     # Increase volume by multiplying the audio data
-                    volume_multiplier = 2.0  # Adjust this value to increase or decrease volume
+                    volume_multiplier = 1.5  # Adjust this value to increase or decrease volume
                     audio_data = np.frombuffer(audio_data_bytes, dtype=np.int16)
                     audio_data = (audio_data * volume_multiplier).astype(np.int16)
                     stream_audio.write(audio_data.tobytes())
@@ -287,31 +312,99 @@ async def stream_text_to_speech(text):
         await ws.close()
         await client.close()
         audio_playing = False  # Set flag back to False after audio playback is complete
+        skeleton.stop_mouth_movement()  # Stop moving the skeleton's mouth
 
 def wake_word_detector():
-    global porcupine, recorder
+    global porcupine, recorder, skeleton
     try:
         while True:
             pcm = recorder.read()
             result = porcupine.process(pcm)
             if result >= 0:
                 print("Wake word detected!")
-                # Add your wake word detection logic here
-                asyncio.run(handle_wake_word())
+                skeleton.eyes_on()  # Turn on skeleton eyes
+                if CONVERSATION_MODE == "live":
+                    asyncio.run(handle_wake_word_live())
+                else:
+                    asyncio.run(handle_wake_word())
+                skeleton.eyes_off()  # Turn off skeleton eyes after conversation
     except KeyboardInterrupt:
         print("Wake word detection stopped.")
     except Exception as e:
         print(f"Error in wake word detector: {e}")
 
-async def handle_wake_word():
-    global camera
-    print("Wake word detected! Taking a picture...")
+# Add a new function to handle wake word in live mode
+async def handle_wake_word_live():
+    global camera, livekit_room, livekit_agent
+    print("Wake word detected! Starting live conversation and taking a picture...")
     
-    # Capture an image (now returns a PIL Image directly)
+    # Initialize LiveKit room and agent when wake word is detected
+    if CONVERSATION_MODE == "live" and not livekit_room:
+        try:
+            livekit_room, livekit_agent = await initialize_livekit_agent()
+            print("LiveKit room and agent initialized successfully.")
+        except Exception as e:
+            print(f"Failed to initialize LiveKit room and agent: {e}")
+            return
+
+    # Capture an image
     pil_image = camera.capture_image()
     
     if pil_image is not None:
-        # Process the image with the chat model
+        # Process the image with Gemini in the background
+        gemini_thread = Thread(target=process_image_with_gemini, args=(pil_image,), daemon=True)
+        gemini_thread.start()
+        
+        # Start the LiveKit conversation
+        if livekit_agent:
+            await livekit_agent.on_start()
+        else:
+            print("LiveKit agent not initialized. Cannot start conversation.")
+        
+        # Start listening for audio input
+        audio_input_thread = Thread(target=listen_for_audio_input, daemon=True)
+        audio_input_thread.start()
+    else:
+        print("Failed to capture an image.")
+
+# Add a new function to listen for audio input
+def listen_for_audio_input():
+    global recorder, livekit_agent
+    try:
+        while True:
+            audio_data = recorder.read()
+            asyncio.run(livekit_agent.on_audio(audio_data))
+    except Exception as e:
+        print(f"Error listening for audio input: {e}")
+
+# Add a new function to process the image with Gemini
+def process_image_with_gemini(pil_image):
+    prompt = "Identify the costume/costumers in this image and respond with a detailed description of the image with emphasis on Halloween and costumes. If there's no costume detected, reply with 'no costume'. If there are multiple ones, or you think this is a family, say a dad with a kid, respond with that info."
+    response = gemini_chat(pil_image, prompt)
+    print(f"Gemini image analysis: {response}")
+    # You can add logic here to use the Gemini response if needed
+
+# Update the handle_wake_word function for regular mode
+async def handle_wake_word():
+    global camera
+    #play sound from sounds directory using pyaudio
+    def play_sound():
+        p = pyaudio.PyAudio()
+        stream = p.open(format=pyaudio.paInt16, channels=1, rate=44100, output=True, frames_per_buffer=1024)
+        with open("sounds/boogeyman.wav", "rb") as f:
+            data = f.read()
+        stream.write(data)
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+    sound_thread = threading.Thread(target=play_sound)
+    sound_thread.start()
+    print("Wake word detected! Taking a picture...")
+    
+    pil_image = camera.capture_image()
+    
+    if pil_image is not None:
         if CHAT_MODEL == "gemini":
             response = gemini_chat(pil_image)
         elif CHAT_MODEL == "openai":
@@ -321,7 +414,7 @@ async def handle_wake_word():
         else:
             response = "I'm sorry, but I couldn't process the image at the moment."
         
-        # Stream the response to the user
+        
         await stream_text_to_speech(response)
     else:
         await stream_text_to_speech("I'm sorry, but I couldn't take a picture at the moment.")
