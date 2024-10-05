@@ -13,6 +13,7 @@ import uvicorn
 import cv2
 import pyaudio
 from PIL import Image
+import numpy as np
 
 from cartesia import AsyncCartesia
 import weave
@@ -23,6 +24,11 @@ from dotenv import load_dotenv
 from gemini import gemini_chat
 from openai_client import openai_chat
 from openrouter import openrouter_chat
+
+# Import Porcupine and PvRecorder
+import pvporcupine
+from pvrecorder import PvRecorder
+import struct
 
 load_dotenv()
 
@@ -37,26 +43,50 @@ audio_playing = False
 # Choose the chat model to use
 CHAT_MODEL = "gemini"  # Options: "gemini", "openai", "openrouter"
 
+# Porcupine wake word detection
+porcupine = None
+recorder = None
+
+# Flag to enable/disable motion detection
+ENABLE_MOTION_DETECTION = False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global camera
+    global camera, porcupine, recorder
     camera = cv2.VideoCapture(0)
     weave.init('altryne-halloween-2024')
     if not camera.isOpened():
         raise RuntimeError("Could not open camera")
     
+    # Initialize Porcupine
+    access_key = os.getenv("PICOVOICE_ACCESS_KEY")
+    keyword_path = "path/to/trick-or-treat_en_raspberry-pi_v2_2_0.ppn"  # Update this path
+    porcupine = pvporcupine.create(access_key=access_key, keyword_paths=[keyword_path])
+    
+    # Initialize PvRecorder
+    recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
+    
     # Start frame capture in a separate thread
     capture_thread = Thread(target=capture_frames, daemon=True)
     capture_thread.start()
     
-    # Start motion detection in a separate thread
-    motion_thread = Thread(target=motion_detector, daemon=True)
-    motion_thread.start()
+    # Start motion detection in a separate thread only if enabled
+    if ENABLE_MOTION_DETECTION:
+        motion_thread = Thread(target=motion_detector, daemon=True)
+        motion_thread.start()
+    
+    # Start wake word detection in a separate thread
+    wake_word_thread = Thread(target=wake_word_detector, daemon=True)
+    wake_word_thread.start()
     
     yield
     
     if camera:
         camera.release()
+    if porcupine:
+        porcupine.delete()
+    if recorder:
+        recorder.stop()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -129,7 +159,7 @@ def motion_detector():
 @app.get("/motion")
 def check_motion():
     global motion_detected
-    if motion_detected:
+    if ENABLE_MOTION_DETECTION and motion_detected:
         motion_detected = False
         return {"motion": True}
     return {"motion": False}
@@ -183,18 +213,18 @@ async def stream_text_to_speech(text):
         audio_buffer = b""
 
         if audio_buffer:
-        stream_audio = p.open(
-            format=pyaudio.paInt16,  # Changed to match the new encoding
-            channels=1,
-            rate=rate,
-            output=True,
-            frames_per_buffer=1024,  # Adjust buffer size for smoother playback
-        )
-        # Increase volume by multiplying the audio data
-        volume_multiplier = 2.0  # Adjust this value to increase or decrease volume
-        audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
-        audio_data = (audio_data * volume_multiplier).astype(np.int16)
-        stream_audio.write(audio_data.tobytes())
+            stream_audio = p.open(
+                format=pyaudio.paInt16,  # Changed to match the new encoding
+                channels=1,
+                rate=rate,
+                output=True,
+                frames_per_buffer=1024,  # Adjust buffer size for smoother playback
+            )
+            # Increase volume by multiplying the audio data
+            volume_multiplier = 2.0  # Adjust this value to increase or decrease volume
+            audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
+            audio_data = (audio_data * volume_multiplier).astype(np.int16)
+            stream_audio.write(audio_data.tobytes())
     finally:
         if stream_audio:
             stream_audio.stop_stream()
@@ -204,8 +234,36 @@ async def stream_text_to_speech(text):
         await client.close()
         audio_playing = False  # Set flag back to False after audio playback is complete
 
-# Add this import at the top of the file
-import numpy as np
+def wake_word_detector():
+    global recorder, porcupine, motion_detected, last_motion_time, audio_playing
+    print("Listening for wake word 'trick or treat'...")
+    recorder.start()
+
+    try:
+        while True:
+            pcm = recorder.read()
+            result = porcupine.process(struct.unpack_from("h" * porcupine.frame_length, bytes(pcm)))
+            
+            if result >= 0 and not audio_playing:
+                print("Wake word detected!")
+                recorder.stop()
+                
+                # Trigger the actions
+                current_time = time.time()
+                if current_time - last_motion_time > 5:  # 5-second cooldown
+                    last_motion_time = current_time
+                    if not frame_queue.empty():
+                        frame = frame_queue.get()
+                        pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        asyncio.run(process_motion(pil_image))
+                
+                # Reset for next detection
+                time.sleep(2)
+                recorder.start()
+                print("Listening for wake word 'trick or treat'...")
+            
+    except KeyboardInterrupt:
+        print("Stopping wake word detection...")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)

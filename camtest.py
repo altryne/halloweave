@@ -1,13 +1,17 @@
+from camera import get_camera
 import cv2
 
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    print("Cannot open camera")
-else:
-    ret, frame = cap.read()
-    if ret:
-        cv2.imwrite('test_image.jpg', frame)
+def main():
+    camera = get_camera()
+    image = camera.capture_image()
+    
+    if image is not None:
+        cv2.imwrite('test_image.jpg', image)
         print("Image captured successfully")
     else:
         print("Couldn't capture image")
-cap.release()
+    
+    camera.release()
+
+if __name__ == "__main__":
+    main()
