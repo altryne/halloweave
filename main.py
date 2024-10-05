@@ -89,10 +89,9 @@ async def lifespan(app: FastAPI):
     import platform
     if platform.system() == "Darwin":  # Mac OS
         keyword_path = "./porcupine_models/trick-or-treat_en_mac_v3_0_0.ppn"
-    elif platform.system() == "Linux" and platform.machine().startswith("arm"):  # Raspberry Pi
-        keyword_path = "./porcupine_models/trick-or-treat_en_raspberry-pi_v2_2_0.ppn"
     else:
-        raise RuntimeError("Unsupported platform for wake word detection")
+        keyword_path = "./porcupine_models/trick-or-treat_en_raspberry-pi_v2_2_0.ppn"
+    
     porcupine = pvporcupine.create(access_key=access_key, keyword_paths=[keyword_path])
 
     # Initialize PvRecorder
