@@ -9,7 +9,8 @@ python-dotenv
 cartesia
 weave
 Pillow
-picamera2
-RPi.GPIO
+# RPi.GPIO
 pvporcupine
 pvrecorder
+pygame
+rpi-lgpio

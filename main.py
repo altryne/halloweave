@@ -41,6 +41,14 @@ import json
 import openai
 from skeleton_control import SkeletonControl
 
+import logging
+
+import signal
+import sys
+
+logging.basicConfig(filename='/home/altryne/halloween/halloween_app.log', level=logging.DEBUG, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 load_dotenv()
 
 # Global variables for camera and motion detection
@@ -71,8 +79,16 @@ skeleton = None
 
 app = FastAPI()
 
+def signal_handler(sig, frame):
+    print('You pressed Ctrl+C!')
+    # Add any cleanup code here
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):   
     global camera, porcupine, recorder, skeleton
     # Replace the existing camera initialization with:
     camera = get_camera()
@@ -242,6 +258,7 @@ async def stream_text_to_speech(text):
 
     try:
         audio_playing = True  # Set flag to True before starting audio playback
+        skeleton.start_body_movement()  # Start body movement when speech begins
         
         await ctx.send(
             model_id=model_id,
@@ -254,42 +271,32 @@ async def stream_text_to_speech(text):
         # Iterate over the async generator to receive audio data
         async for audio_buffer in ctx.receive():
             if audio_buffer:
-                # Debugging: Print the type and keys of audio_buffer
-                # Remove or comment out this line in production
-                print(f"Received audio_buffer: {audio_buffer}")
-
-                # Determine the structure of audio_buffer and extract audio bytes accordingly
                 audio_data_bytes = None
 
                 if isinstance(audio_buffer, dict):
-                    # Check if 'data' key exists
                     audio_data_bytes = audio_buffer.get('data')
                     if not audio_data_bytes:
-                        # If 'data' key does not exist, check other possible keys or handle accordingly
-                        # For example, check if the first element is bytes
                         if len(audio_buffer) > 0 and isinstance(list(audio_buffer.values())[0], bytes):
                             audio_data_bytes = list(audio_buffer.values())[0]
                 elif isinstance(audio_buffer, (tuple, list)) and len(audio_buffer) > 0 and isinstance(audio_buffer[0], bytes):
                     audio_data_bytes = audio_buffer[0]
                 elif isinstance(audio_buffer, bytes):
-                    # If audio_buffer is bytes, use it directly
                     audio_data_bytes = audio_buffer
                 else:
                     print("Unknown audio_buffer format.")
                     continue
 
                 if not audio_data_bytes:
-                    # If unable to extract bytes, skip processing
                     print("No audio bytes found in audio_buffer. Skipping...")
                     continue
 
                 if not stream_audio:
                     stream_audio = p.open(
-                        format=pyaudio.paInt16,  # Changed to match the new encoding
+                        format=pyaudio.paInt16,
                         channels=1,
                         rate=rate,
                         output=True,
-                        frames_per_buffer=1024,  # Adjust buffer size for smoother playback
+                        frames_per_buffer=1024,
                     )
                 try:
                     # Increase volume by multiplying the audio data
@@ -297,11 +304,9 @@ async def stream_text_to_speech(text):
                     audio_data = np.frombuffer(audio_data_bytes, dtype=np.int16)
                     audio_data = (audio_data * volume_multiplier).astype(np.int16)
                     stream_audio.write(audio_data.tobytes())
-
-                    # Calculate amplitude and control mouth movement
-                    amplitude = np.abs(audio_data).mean()
-                    duration = min(max(0.01, amplitude / 30000), 0.15)  # Scale duration dynamically
-                    skeleton.dynamic_mouth_movement(duration)  # Dynamic mouth movement based on amplitude
+                    # Move the skeleton's mouth based on the audio data
+                    skeleton.move_mouth(audio_data.tobytes())
+                    print("Moving mouth")
 
                 except Exception as e:
                     print(f"Error processing audio data: {e}")
@@ -315,7 +320,8 @@ async def stream_text_to_speech(text):
         await ws.close()
         await client.close()
         audio_playing = False  # Set flag back to False after audio playback is complete
-        skeleton.stop_mouth_movement()  # Stop moving the skeleton's mouth
+        skeleton.stop_body_movement()
+        skeleton.eyes_off()
 
 def wake_word_detector():
     global porcupine, recorder, skeleton
@@ -390,27 +396,20 @@ def process_image_with_gemini(pil_image):
 # Update the handle_wake_word function for regular mode
 async def handle_wake_word():
     global camera
-
+    # move the skeleton body and light up eyes
+    skeleton.start_body_movement()
+    skeleton.eyes_on()
     print("Wake word detected! Taking a picture...")
     
     pil_image = camera.capture_image()
+    pil_image.save("taken_image.jpg")
 
-    #play sound from sounds directory using pyaudio
-    def play_sound():
-        p = pyaudio.PyAudio()
-        stream = p.open(format=pyaudio.paInt16, channels=1, rate=44100, output=True, frames_per_buffer=1024)
-        with open("sounds/boogeyman.wav", "rb") as f:
-            data = f.read()
-        stream.write(data)
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-
-    sound_thread = threading.Thread(target=play_sound)
-    sound_thread.start()
+    
+    audio_file = "/home/altryne/halloween/sounds/boogeyman.wav"
+    skeleton.play_audio_and_move_mouth(audio_file)
     
     
-    if pil_image is not None:
+    if pil_image is not None :
         if CHAT_MODEL == "gemini":
             response = gemini_chat(pil_image)
         elif CHAT_MODEL == "openai":
@@ -422,8 +421,17 @@ async def handle_wake_word():
         
         
         await stream_text_to_speech(response)
+        # stop the skeleton body movement and turn off the eyes
+        skeleton.stop_body_movement()
+        skeleton.eyes_off()
     else:
         await stream_text_to_speech("I'm sorry, but I couldn't take a picture at the moment.")
+        skeleton.stop_body_movement()
+        skeleton.eyes_off()
+
+    return True
+
+    
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)

@@ -1,0 +1,14 @@
+[Unit]
+Description=Halloween Project Bootstrap
+After=bluetooth.target network.target
+
+[Service]
+ExecStart=/home/altryne/halloween/halloween_bootstrap.sh
+WorkingDirectory=/home/altryne/halloween
+User=altryne
+Group=altryne
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
