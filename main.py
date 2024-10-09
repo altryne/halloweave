@@ -146,7 +146,9 @@ async def lifespan(app: FastAPI):
             skeleton.cleanup()
 
 app = FastAPI(lifespan=lifespan)
+from routes import router as webhook_router
 
+app.include_router(webhook_router)
 @app.get("/")
 def read_root():
     return {"status": "Service is running"}

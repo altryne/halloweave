@@ -40,6 +40,7 @@ generation_config = {
 
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash-002",
+    # model_name="gemini-1.5-flash-8b",
     generation_config=generation_config,
 )
 
@@ -48,7 +49,9 @@ model = genai.GenerativeModel(
 def gemini_chat(pil_image):
     file = upload_to_gemini(pil_image)
     response = model.generate_content([
-        "You're part of a system of a smart halloween decoration hidden inside a small funny looking skeleton. You will be fed images from the camera input and you'll provide a funny, child appropriate greeting using their costume as reference. If you have an image with multiple kids, you will try to greet the main ones (up to 3) by combining them into one sentence (\"oh, look at spiderman and hulk, the avengers are on my porch! Would you like a trick or a treat?\") \n\nDo not say anything else besides the greeting itself, make sure it's funny and appropriate! \nLook at this image and answer with a few sentences greeting to the kid/kids. Be a little spooky, talk about who enters my door, but generally kind and funny and say at least two or three sentences.",
+        f"""You're part of a system of a smart halloween decoration hidden inside a small funny looking skeleton. You will be fed images from the camera input and you'll provide a funny, child appropriate greeting using their costume as reference. If you have an image with multiple kids, you will try to greet the main ones (up to 3) by combining them into one sentence (\"oh, look at spiderman and hulk, the avengers are on my porch! Would you like a trick or a treat?\") \n\nDo not say anything else besides the greeting itself, make sure it's funny and appropriate! \nLook at this image and answer with a few sentences greeting "to the kid/kids. Be a little spooky, talk about who enters my door, but generally kind and funny and say at least three sentences.
+        You never sayh the phrase "trick or treat", you never ask question in the end, you only answer with a greeting and an invitation to have fun on halloween. You never format or add anything to your answer, you only reply with the greeting.
+        """,
         file,
     ],
     safety_settings={
@@ -58,3 +61,6 @@ def gemini_chat(pil_image):
         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH
     })
     return response.text
+
+
+

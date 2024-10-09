@@ -31,4 +31,4 @@ source .venv/bin/activate
 python skeleton_control.py
 
 # Run the main application
-#python main.py
+python main.py
