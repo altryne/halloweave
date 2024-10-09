@@ -48,6 +48,8 @@ import sys
 
 from concurrent.futures import ThreadPoolExecutor
 
+from cartesia_client import CartesiaStreamingClient
+
 logging.basicConfig(filename='/home/altryne/halloween/halloween_app.log', level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -243,85 +245,19 @@ async def process_motion(pil_image):
 
 async def stream_text_to_speech(text):
     global audio_playing, skeleton
-    client = AsyncCartesia(api_key=os.environ.get("CARTESIA_API_KEY"))
-    ws = await client.tts.websocket()
-    ctx = ws.context()
-
-    # Initialize audio playback
-    p = pyaudio.PyAudio()
-    stream_audio = None
-    rate = 44100
-
-    voice_id = "87748186-23bb-4158-a1eb-332911b0b708"
-    model_id = "sonic-english"
-    output_format = {
-        "container": "raw",
-        "encoding": "pcm_s16le",
-        "sample_rate": rate,
-    }
-
-    executor = ThreadPoolExecutor(max_workers=2)
+    skeleton = SkeletonControl()  # Initialize skeleton instance
+    client = CartesiaStreamingClient(skeleton=skeleton)  # Pass skeleton to client
 
     try:
         audio_playing = True
         skeleton.start_body_movement()
-        
-        await ctx.send(
-            model_id=model_id,
-            transcript=text,
-            voice_id=voice_id,
-            continue_=False,
-            output_format=output_format,
-        )
+        skeleton.eyes_on()
 
-        buffer = b""
-        async for audio_buffer in ctx.receive():
-            if audio_buffer:
-                audio_data_bytes = None
-
-                if isinstance(audio_buffer, dict):
-                    audio_data_bytes = audio_buffer.get('data') or next((v for v in audio_buffer.values() if isinstance(v, bytes)), None)
-                elif isinstance(audio_buffer, (tuple, list)) and audio_buffer and isinstance(audio_buffer[0], bytes):
-                    audio_data_bytes = audio_buffer[0]
-                elif isinstance(audio_buffer, bytes):
-                    audio_data_bytes = audio_buffer
-
-                if not audio_data_bytes:
-                    print("No audio bytes found in audio_buffer. Skipping...")
-                    continue
-
-                buffer += audio_data_bytes
-                if len(buffer) >= 4096:  # Process in larger chunks
-                    if not stream_audio:
-                        stream_audio = p.open(
-                            format=pyaudio.paInt16,
-                            channels=1,
-                            rate=rate,
-                            output=True,
-                            frames_per_buffer=1024,
-                        )
-
-                    audio_data = np.frombuffer(buffer, dtype=np.int16)
-                    volume_multiplier = 1.5
-                    audio_data = (audio_data * volume_multiplier).astype(np.int16)
-                    
-                    # Use ThreadPoolExecutor for parallel processing
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(executor, stream_audio.write, audio_data.tobytes())
-                    await loop.run_in_executor(executor, skeleton.move_mouth, audio_data.tobytes())
-                    
-                    buffer = b""  # Clear the buffer after processing
-
+        await client.stream_audio(text)  # Client handles streaming and skeleton movement
     except Exception as e:
         print(f"Error during text-to-speech: {e}")
     finally:
-        if stream_audio:
-            stream_audio.stop_stream()
-            stream_audio.close()
-        p.terminate()
-        await ws.close()
         await client.close()
-        executor.shutdown()
         audio_playing = False
         skeleton.stop_body_movement()
         skeleton.eyes_off()
