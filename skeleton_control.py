@@ -43,25 +43,22 @@ class SkeletonControl:
             print("Eyes turned off")
         self.eyes_lit = False
 
-    def move_mouth(self, audio_buffer):
-        """Move mouth based on audio buffer, distinguishing vowels, consonants, and silence."""
-        # Debug print to show the received audio buffer
-        print(f"Received audio buffer: length={len(audio_buffer)}, type={type(audio_buffer)}")
-        print(f"First few bytes: {audio_buffer[:20]}")  # Print first 20 bytes as a sample
-        sample_rate = 44100  # Hz
-        chunk_duration = 0.1  # 100ms
+    def move_mouth(self, audio_buffer, word_timings=None):
+        """Move mouth based on audio buffer and word timings."""
+        # print(f"Received audio buffer: length={len(audio_buffer)}, type={type(audio_buffer)}")
+        # print(f"First few bytes: {audio_buffer[:20]}")
+        
+        sample_rate = 22050  # Hz (updated to match the new rate)
+        chunk_duration = 0.02  # 50ms chunks for more granular control
         chunk_size = int(sample_rate * chunk_duration)
         total_chunks = len(audio_buffer) // 2 // chunk_size  # 2 bytes per sample for int16
 
-        # Define vowel frequency range (e.g., 300Hz to 3000Hz)
-        vowel_freq_min = 300
-        vowel_freq_max = 3000
-
-        # Define silence threshold
-        silence_threshold = 500  # Adjust this value based on your audio characteristics
+        silence_threshold = 300  # Adjust this value based on your audio characteristics
 
         audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
 
+        current_time = 0
+        last_word_end = 0
         for i in range(total_chunks):
             start = i * chunk_size
             end = start + chunk_size
@@ -72,60 +69,40 @@ class SkeletonControl:
 
             # Check for silence
             if np.max(np.abs(chunk)) < silence_threshold:
-                if ON_RASPBERRY_PI:
-                    GPIO.output(self.mouth_pin, GPIO.LOW)
-                else:
-                    print("Mouth closed (silence)")
+                self._set_mouth_state(False)
                 time.sleep(chunk_duration)
+                current_time += chunk_duration
                 continue
 
-            # Perform FFT on the chunk
-            fft = np.fft.fft(chunk)
-            freqs = np.fft.fftfreq(len(chunk), 1 / sample_rate)
-            magnitudes = np.abs(fft)
-
-            # Consider only positive frequencies
-            positive_freqs = freqs[:len(freqs)//2]
-            positive_magnitudes = magnitudes[:len(magnitudes)//2]
-
-            # Calculate average magnitude in vowel range
-            vowel_indices = np.where((positive_freqs >= vowel_freq_min) & (positive_freqs <= vowel_freq_max))[0]
-            if len(vowel_indices) == 0:
-                is_vowel = False
-            else:
-                avg_vowel_magnitude = np.mean(positive_magnitudes[vowel_indices])
-                overall_avg_magnitude = np.mean(positive_magnitudes)
+            # If we have word timings, use them for more accurate mouth movement
+            if word_timings:
+                is_speaking = False
+                for word, word_start, word_end in zip(word_timings['words'], word_timings['start'], word_timings['end']):
+                    if word_start <= current_time < word_end:
+                        is_speaking = True
+                        last_word_end = word_end
+                        break
                 
-                # Threshold: if vowel magnitude is significantly higher than overall
-                if avg_vowel_magnitude > 1.5 * overall_avg_magnitude:
-                    is_vowel = True
-                else:
-                    is_vowel = False
-
-            # Determine mouth movement duration
-            if is_vowel:
-                duration = 0.1  # 100ms for vowels
+                # Close mouth between words
+                if current_time > last_word_end + 0.1:  # Add a small delay after each word
+                    is_speaking = False
+                
+                self._set_mouth_state(is_speaking)
             else:
-                duration = 0.02  # 20ms for consonants
+                # Fallback to simple amplitude-based mouth movement
+                self._set_mouth_state(True)
 
-            # Control the DC motor
-            if duration > 0:
-                if ON_RASPBERRY_PI:
-                    GPIO.output(self.mouth_pin, GPIO.HIGH)
-                    time.sleep(duration)
-                    GPIO.output(self.mouth_pin, GPIO.LOW)
-                else:
-                    print(f"Mouth {'fully open' if is_vowel else 'slightly open'} for {duration:.3f} seconds")
-            else:
-                if ON_RASPBERRY_PI:
-                    GPIO.output(self.mouth_pin, GPIO.LOW)
-                else:
-                    print("Mouth closed")
+            time.sleep(chunk_duration)
+            current_time += chunk_duration
 
-            # Maintain consistent timing
-            remaining_time = chunk_duration - duration
-            if remaining_time > 0:
-                time.sleep(remaining_time)
+        # Ensure mouth is closed at the end
+        self._set_mouth_state(False)
+
+    def _set_mouth_state(self, is_open):
+        if ON_RASPBERRY_PI:
+            GPIO.output(self.mouth_pin, GPIO.HIGH if is_open else GPIO.LOW)
+        else:
+            print(f"Mouth {'open' if is_open else 'closed'}")
 
     def start_body_movement(self):
         """Start the body movement."""
@@ -172,14 +149,14 @@ class SkeletonControl:
         self.body_moving = False
         self.mouth_speaking = False
 
-    def play_audio_and_move_mouth(self, audio_file):
+    def play_audio_and_move_mouth(self, audio_file, word_timings=None):
         """Play audio and move mouth in a separate thread."""
         sound = pygame.mixer.Sound(audio_file)
         audio_array = pygame.sndarray.array(sound)
         
         def audio_thread():
             channel = sound.play()
-            self.move_mouth(audio_array.tobytes())
+            self.move_mouth(audio_array.tobytes(), word_timings)
             while channel.get_busy():
                 pygame.time.wait(100)
         

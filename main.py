@@ -172,10 +172,30 @@ def gen_frames():
     while True:
         if not frame_queue.empty():
             frame = frame_queue.get()
-            # Assuming frame is already in the correct format (JPEG bytes)
-            # If not, you may need to convert it here
+            
+            # Check if frame is already bytes
+            if isinstance(frame, bytes):
+                jpeg_bytes = frame
+            # Check if frame is a PIL Image
+            elif isinstance(frame, Image.Image):
+                # Convert PIL Image to JPEG bytes
+                buffer = BytesIO()
+                frame.save(buffer, format="JPEG")
+                jpeg_bytes = buffer.getvalue()
+            # Check if frame is a numpy array (OpenCV format)
+            elif isinstance(frame, np.ndarray):
+                # Convert numpy array to PIL Image
+                pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                # Convert PIL Image to JPEG bytes
+                buffer = BytesIO()
+                pil_image.save(buffer, format="JPEG")
+                jpeg_bytes = buffer.getvalue()
+            else:
+                print(f"Unexpected frame type: {type(frame)}")
+                continue  # Skip this frame
+
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
         else:
             time.sleep(0.01)
 
@@ -253,7 +273,7 @@ async def stream_text_to_speech(text):
         skeleton.start_body_movement()
         skeleton.eyes_on()
 
-        await client.stream_audio(text)  # Client handles streaming and skeleton movement
+        await client.stream_tts(text)
     except Exception as e:
         print(f"Error during text-to-speech: {e}")
     finally:

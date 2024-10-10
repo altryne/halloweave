@@ -74,8 +74,7 @@ class CartesiaStreamingClient:
             start_time = asyncio.get_event_loop().time()
             async for response in ctx.receive():
 
-                if response.get('word_timestamps'):
-                    print(response['word_timestamps'])
+                
                 if response.get('audio'):
                     audio_data_bytes = self._extract_audio_bytes(response['audio'])
                     if audio_data_bytes:
@@ -111,7 +110,7 @@ class CartesiaStreamingClient:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(self.executor, self.skeleton.move_mouth, audio_data.tobytes())
 
-        print(f"Timestamp: {chunk['timestamp']:.2f}s")
+        # print(f"Timestamp: {chunk['timestamp']:.2f}s")
 
     async def close(self):
         if self.audio_stream:
