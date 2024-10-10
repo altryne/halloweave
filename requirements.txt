@@ -14,3 +14,4 @@ pvporcupine
 pvrecorder
 pygame
 rpi-lgpio
+loguru

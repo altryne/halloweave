@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
 from skeleton_control import SkeletonControl
-
+import time 
+import pygame
 load_dotenv()
 
 class CartesiaStreamingClient:
@@ -26,9 +27,10 @@ class CartesiaStreamingClient:
             channels=1,
             rate=self.rate,
             output=True,
-            frames_per_buffer=1024,
+            frames_per_buffer=4096,
         )
         self.executor = ThreadPoolExecutor(max_workers=2)
+        pygame.mixer.init()
 
     async def stream_tts(self, text: str, use_sse: bool = False):
         output_format = {
@@ -72,8 +74,24 @@ class CartesiaStreamingClient:
             
 
             start_time = asyncio.get_event_loop().time()
-            async for response in ctx.receive():
+            # Import pygame and initialize the mixer
+            
 
+
+            def fade_music(target_volume, duration_ms, steps=100):
+                """Fade the music volume to the target_volume over duration_ms milliseconds."""
+                current_volume = pygame.mixer.music.get_volume()
+                volume_difference = current_volume - target_volume
+                delay = duration_ms / steps / 1000.0  # Convert milliseconds to seconds
+                for i in range(steps):
+                    # Calculate the new volume
+                    new_volume = current_volume - (volume_difference * (i + 1) / steps)
+                    pygame.mixer.music.set_volume(new_volume)
+                    time.sleep(delay)
+
+            fade_music(0.3, 1000)
+
+            async for response in ctx.receive():
                 
                 if response.get('audio'):
                     audio_data_bytes = self._extract_audio_bytes(response['audio'])

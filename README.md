@@ -54,6 +54,57 @@ Run the main application:
 python main.py
 ```
 
+## 🤖 Automatic Service Setup (Raspberry Pi)
+
+To run the Halloween project automatically on your Raspberry Pi, follow these steps:
+
+1. Copy the service file to the systemd directory:
+   ```
+   sudo cp halloween.service /etc/systemd/system/
+   ```
+
+2. Make sure the bootstrap script is executable:
+   ```
+   chmod +x /home/altryne/halloween/halloween_bootstrap.sh
+   ```
+
+3. Reload the systemd daemon:
+   ```
+   sudo systemctl daemon-reload
+   ```
+
+4. Enable the service to start on boot:
+   ```
+   sudo systemctl enable halloween.service
+   ```
+
+5. Start the service:
+   ```
+   sudo systemctl start halloween.service
+   ```
+
+### Managing the Service
+
+- To stop the service:
+  ```
+  sudo systemctl stop halloween.service
+  ```
+
+- To restart the service:
+  ```
+  sudo systemctl restart halloween.service
+  ```
+
+- To check the status of the service:
+  ```
+  sudo systemctl status halloween.service
+  ```
+
+- To view the service logs:
+  ```
+  sudo journalctl -u halloween.service
+  ```
+
 ## 📷 Camera Setup
 
 Ensure your camera is correctly configured and accessible by OpenCV. You may need to adjust the camera index (`0` by default) in the code if your system has multiple cameras.

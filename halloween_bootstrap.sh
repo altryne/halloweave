@@ -4,14 +4,14 @@
 
 # Connect to the Bluetooth device
 for attempt in {1..3}; do
-    if bluetoothctl connect 7A:41:D4:A4:17:26; then
+    if bluetoothctl connect FC:A1:83:5E:5B:43; then
         echo "Bluetooth device connected successfully."
         break
     else
         echo "Failed to connect to Bluetooth device. Attempt $attempt of 3."
         if [ $attempt -lt 3 ]; then
-            echo "Waiting 10 seconds before retrying..."
-            sleep 10
+            echo "Waiting 3 seconds before retrying..."
+            sleep 3
         else
             echo "Failed to connect after 3 attempts. Continuing with the script."
         fi
