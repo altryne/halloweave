@@ -1,12 +1,16 @@
 [Unit]
 Description=Halloween Project Bootstrap
-After=bluetooth.target network.target
+After=bluetooth.target network.target pulseaudio.service
+Wants=pulseaudio.service
 
 [Service]
+Type=simple
 ExecStart=/home/altryne/halloween/halloween_bootstrap.sh
 WorkingDirectory=/home/altryne/halloween
 User=altryne
-Group=altryne
+Group=audio
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
 Restart=on-failure
 RestartSec=10
 

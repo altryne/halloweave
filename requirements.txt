@@ -15,3 +15,9 @@ pvrecorder
 pygame
 rpi-lgpio
 loguru
+
+openai-realtime-client
+# New packages
+pydub
+websockets
+llama-index

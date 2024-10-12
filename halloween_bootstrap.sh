@@ -1,10 +1,17 @@
 #!/bin/bash
 
+# Export XDG_RUNTIME_DIR for PulseAudio
+export XDG_RUNTIME_DIR=/run/user/$(id -u altryne)
 
+# Wait for audio device to be ready
+sleep 5
+
+# Ensure PulseAudio is running for this user
+pulseaudio --start
 
 # Connect to the Bluetooth device
 for attempt in {1..3}; do
-    if bluetoothctl connect FC:A1:83:5E:5B:43; then
+    if bluetoothctl connect D6:F7:3D:E8:F9:68; then
         echo "Bluetooth device connected successfully."
         break
     else
@@ -19,7 +26,7 @@ for attempt in {1..3}; do
 done
 
 # Wait for the Bluetooth connection to establish
-# sleep 2
+sleep 2
 
 # Change to the Halloween project directory
 cd /home/altryne/halloween
