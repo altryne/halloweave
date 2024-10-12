@@ -383,7 +383,7 @@ async def handle_wake_word():
             else:
                 time.sleep(1)  # Wait for 1 second before retrying
 
-    audio_file = "/home/altryne/halloween/sounds/spookymusic.wav"
+    audio_file = f"/home/altryne/halloween/sounds/spookybg_{np.random.randint(1, 6)}.wav"
     # Define function to play audio file
     import pygame
     def play_sound(file_path):

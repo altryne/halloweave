@@ -75,8 +75,6 @@ class CartesiaStreamingClient:
 
             start_time = asyncio.get_event_loop().time()
             # Import pygame and initialize the mixer
-            
-
 
             def fade_music(target_volume, duration_ms, steps=100):
                 """Fade the music volume to the target_volume over duration_ms milliseconds."""

@@ -2,6 +2,8 @@ import time
 import threading
 import numpy as np
 import pygame
+import wave
+import pyaudio
 
 try:
     import RPi.GPIO as GPIO
@@ -168,29 +170,46 @@ if __name__ == "__main__":
     print("Booting sequence initiated...")
     print("Starting diagnostics skeleton control test...")
     
-    # Start audio playback and mouth movement in a separate thread
     print("Testing audio playback and mouth movement")
     audio_file = "/home/altryne/halloween/sounds/booting_seq.wav"
-    skeleton.play_audio_and_move_mouth(audio_file)
     
-    # Flash eyes a couple of times while audio is playing
-    for _ in range(2):
-        print("Eyes on")
-        skeleton.eyes_on()
-        time.sleep(2)
-        print("Eyes off")
-        skeleton.eyes_off()
-        time.sleep(0.5)
-    
-    # Body movement test
-    print("Starting body movement")
-    skeleton.start_body_movement()
-    time.sleep(5)
-    print("Stopping body movement")
-    skeleton.stop_body_movement()
-    
-    # Wait for audio to finish (optional)
-    time.sleep(2)  # Adjust this value based on the length of your audio file
+    CHUNK = 4608  # Reduced chunk size for more frequent updates
+    wf = wave.open(audio_file, 'rb')
+    p = pyaudio.PyAudio()
+
+    # Force the stream to use 22050 Hz
+    stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
+                    channels=wf.getnchannels(),
+                    rate=22050,  # Force 22050 Hz
+                    output=True,
+                    frames_per_buffer=CHUNK)
+
+    # Resample the audio if necessary
+    original_rate = wf.getframerate()
+    resampling_factor = 22050 / original_rate
+
+    data = wf.readframes(int(CHUNK * resampling_factor))
+
+    while len(data) > 0:
+        if original_rate != 22050:
+            # Simple linear interpolation for resampling
+            audio_array = np.frombuffer(data, dtype=np.int16)
+            resampled_array = np.interp(
+                np.linspace(0, len(audio_array), int(len(audio_array) * resampling_factor)),
+                np.arange(len(audio_array)),
+                audio_array
+            ).astype(np.int16)
+            resampled_data = resampled_array.tobytes()
+        else:
+            resampled_data = data
+
+        stream.write(resampled_data)
+        skeleton.move_mouth(resampled_data)
+        data = wf.readframes(int(CHUNK * resampling_factor))
+
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
     
     print("Skeleton control test completed.")
-    # skeleton.cleanup()
+    skeleton.cleanup()
