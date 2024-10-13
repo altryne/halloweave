@@ -31,6 +31,13 @@ class SkeletonControl:
 
         pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=1024)
 
+        # Easily adjustable parameters for mouth movement
+        self.silence_threshold = 1000
+        self.vowel_threshold = 8000
+        self.vowel_duration = 0.06
+        self.consonant_duration = 0.03
+        self.consonant_openness = 0.5
+
     def eyes_on(self):
         if ON_RASPBERRY_PI:
             GPIO.output(self.eyes_pin, GPIO.HIGH)
@@ -46,65 +53,36 @@ class SkeletonControl:
         self.eyes_lit = False
 
     def move_mouth(self, audio_buffer, word_timings=None):
-        """Move mouth based on audio buffer and word timings."""
-        # print(f"Received audio buffer: length={len(audio_buffer)}, type={type(audio_buffer)}")
-        # print(f"First few bytes: {audio_buffer[:20]}")
-        
-        sample_rate = 22050  # Hz (updated to match the new rate)
-        chunk_duration = 0.02  # 50ms chunks for more granular control
-        chunk_size = int(sample_rate * chunk_duration)
-        total_chunks = len(audio_buffer) // 2 // chunk_size  # 2 bytes per sample for int16
-
-        silence_threshold = 300  # Adjust this value based on your audio characteristics
-
+        """Move mouth based on audio buffer, distinguishing between vowels, consonants, and silence."""
+        sample_rate = 22050  # Hz
+        chunk_duration = len(audio_buffer) / (2 * sample_rate)  # 2 bytes per sample for int16
+        # print(f"Chunk duration: {chunk_duration} seconds")
         audio_data = np.frombuffer(audio_buffer, dtype=np.int16)
 
-        current_time = 0
-        last_word_end = 0
-        for i in range(total_chunks):
-            start = i * chunk_size
-            end = start + chunk_size
-            chunk = audio_data[start:end]
+        amplitude = np.max(np.abs(audio_data))
+        print(f"Amplitude: {amplitude}")
 
-            if len(chunk) == 0:
-                continue
-
-            # Check for silence
-            if np.max(np.abs(chunk)) < silence_threshold:
-                self._set_mouth_state(False)
-                time.sleep(chunk_duration)
-                current_time += chunk_duration
-                continue
-
-            # If we have word timings, use them for more accurate mouth movement
-            if word_timings:
-                is_speaking = False
-                for word, word_start, word_end in zip(word_timings['words'], word_timings['start'], word_timings['end']):
-                    if word_start <= current_time < word_end:
-                        is_speaking = True
-                        last_word_end = word_end
-                        break
-                
-                # Close mouth between words
-                if current_time > last_word_end + 0.1:  # Add a small delay after each word
-                    is_speaking = False
-                
-                self._set_mouth_state(is_speaking)
-            else:
-                # Fallback to simple amplitude-based mouth movement
-                self._set_mouth_state(True)
-
-            time.sleep(chunk_duration)
-            current_time += chunk_duration
-
-        # Ensure mouth is closed at the end
-        self._set_mouth_state(False)
-
-    def _set_mouth_state(self, is_open):
-        if ON_RASPBERRY_PI:
-            GPIO.output(self.mouth_pin, GPIO.HIGH if is_open else GPIO.LOW)
+        if amplitude < self.silence_threshold:
+            # Silence
+            self._set_mouth_state(0)
+        elif amplitude > self.vowel_threshold:
+            # Vowel (fully open)
+            self._set_mouth_state(self.vowel_duration)
         else:
-            print(f"Mouth {'open' if is_open else 'closed'}")
+            # Consonant (partially open)
+            self._set_mouth_state(self.consonant_duration)
+
+        # # Sleep for a short duration to allow for visual feedback
+        # time.sleep(min(chunk_duration, 0.05))  # Cap at 50ms to prevent long delays
+
+    def _set_mouth_state(self, openness):
+        """Set the mouth state with a value between 0 (closed) and 1 (fully open)."""
+        if ON_RASPBERRY_PI:
+            # Assuming you're using PWM for more granular control
+            duty_cycle = int(openness * 500)
+            GPIO.output(self.mouth_pin, duty_cycle)
+        else:
+            print(f"Mouth openness: {openness:.2f}")
 
     def start_body_movement(self):
         """Start the body movement."""
@@ -166,6 +144,7 @@ class SkeletonControl:
 
 if __name__ == "__main__":
     skeleton = SkeletonControl()
+
     
     print("Booting sequence initiated...")
     print("Starting diagnostics skeleton control test...")
