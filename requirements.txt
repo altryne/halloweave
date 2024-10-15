@@ -16,7 +16,9 @@ pygame
 rpi-lgpio
 loguru
 
-openai-realtime-client
+jinja2
+sse_starlette
+
 # New packages
 pydub
 websockets

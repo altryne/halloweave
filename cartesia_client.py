@@ -18,7 +18,7 @@ class CartesiaStreamingClient:
         self.client = AsyncCartesia(api_key=self.api_key)
         self.voice_id = "87748186-23bb-4158-a1eb-332911b0b708"
         self.model_id = "sonic-english"
-        self.rate = 22050
+        self.rate = 44100
         self.skeleton = skeleton
         self.audio_playing = False
         self.p = pyaudio.PyAudio()
@@ -33,18 +33,23 @@ class CartesiaStreamingClient:
         pygame.mixer.init()
 
     async def stream_tts(self, text: str, use_sse: bool = False):
-        output_format = {
-            "container": "raw",
-            "encoding": "pcm_s16le",
-            "sample_rate": self.rate,
-        }
+        try:
+            output_format = {
+                "container": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": self.rate,
+            }
 
-        if use_sse:
-            async for chunk in self._stream_sse(text, output_format):
-                await self._handle_chunk(chunk)
-        else:
-            async for chunk in self._stream_websocket(text, output_format):
-                await self._handle_chunk(chunk)
+            if use_sse:
+                async for chunk in self._stream_sse(text, output_format):
+                    await self._handle_chunk(chunk)
+            else:
+                async for chunk in self._stream_websocket(text, output_format):
+                    await self._handle_chunk(chunk)
+        finally:
+            # Ensure the mouth is closed after streaming is complete
+            if self.skeleton:
+                self.skeleton.stop_mouth_movement()
 
     async def _stream_sse(self, text: str, output_format: Dict) -> AsyncGenerator[Dict[str, Union[bytes, float]], None]:
         async with self.client.tts.stream(
@@ -112,26 +117,31 @@ class CartesiaStreamingClient:
 
     async def _handle_chunk(self, chunk: Dict[str, Union[bytes, float]]):
         audio_data = np.frombuffer(chunk['audio'], dtype=np.int16)
-        volume_multiplier = 1.5
+        volume_multiplier = 2
         audio_data = (audio_data * volume_multiplier).astype(np.int16)
+
+        # Print audio statistics
+        max_amplitude = np.max(np.abs(audio_data))
+        mean_amplitude = np.mean(np.abs(audio_data))
+        print(f"Audio chunk - Max amplitude: {max_amplitude}, Mean amplitude: {mean_amplitude}")
 
         # Play audio
         self.audio_stream.write(audio_data.tobytes())
 
         # Move skeleton mouth if instance is provided
         if self.skeleton:
-            if asyncio.iscoroutinefunction(self.skeleton.move_mouth):
-                await self.skeleton.move_mouth(audio_data.tobytes())
-            else:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(self.executor, self.skeleton.move_mouth, audio_data.tobytes())
+            # Use run_in_executor to run the synchronous move_mouth method
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(self.executor, self.skeleton.move_mouth, audio_data.tobytes())
 
-        # print(f"Timestamp: {chunk['timestamp']:.2f}s")
+        print(f"Timestamp: {chunk['timestamp']:.2f}s")
 
     async def close(self):
         if self.audio_stream:
             self.audio_stream.stop_stream()
             self.audio_stream.close()
+        if self.skeleton:
+            self.skeleton.stop_mouth_movement()
         self.p.terminate()
         self.executor.shutdown()
         if self.client:
@@ -145,12 +155,13 @@ async def test_streaming(use_sse: bool = False):
         skeleton.start_body_movement()
         skeleton.eyes_on()
 
-        text = "Hello, this is a tes. How does it sound?"
+        text = "Hello, this is a test. How does it sound? I'm just a friendly neighborhood sekelton speaking to you in a calm and frightening voice"
         await client.stream_tts(text, use_sse)
     finally:
         await client.close()
         skeleton.stop_body_movement()
         skeleton.eyes_off()
+        
 
 if __name__ == "__main__":
     import sys

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Halloween Project Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.1/sse.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen" hx-ext="sse">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold mb-4">Halloween Project Control</h1>
+        <p class="text-xl mb-8">Control and monitor your spooky Halloween setup!</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-semibold mb-4">Status</h2>
+                <ul class="space-y-2" hx-sse="connect:/sse" hx-trigger="sse:status">
+                    <li>
+                        <span class="font-medium">Eyes:</span>
+                        <span id="eyes-status" class="ml-2 px-2 py-1 rounded-full bg-gray-500">Unknown</span>
+                    </li>
+                    <li>
+                        <span class="font-medium">Mouth:</span>
+                        <span id="mouth-status" class="ml-2 px-2 py-1 rounded-full bg-gray-500">Unknown</span>
+                    </li>
+                    <li>
+                        <span class="font-medium">Body:</span>
+                        <span id="body-status" class="ml-2 px-2 py-1 rounded-full bg-gray-500">Unknown</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-semibold mb-4">Controls</h2>
+                <div class="space-y-4">
+                    <button hx-post="/commands" 
+                            hx-headers='{"Content-Type": "application/json"}'
+                            hx-vals='{"command": "toggle_eyes"}' 
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                        Toggle Eyes
+                    </button>
+                    <button hx-post="/commands" 
+                            hx-headers='{"Content-Type": "application/json"}'
+                            hx-vals='{"command": "toggle_mouth"}' 
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                        Toggle Mouth
+                    </button>
+                    <button hx-post="/commands" 
+                            hx-headers='{"Content-Type": "application/json"}'
+                            hx-vals='{"command": "toggle_both"}' 
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                        Toggle Both
+                    </button>
+                    <button hx-post="/commands" 
+                            hx-headers='{"Content-Type": "application/json"}'
+                            hx-vals='{"command": "trigger_wake_word"}' 
+                            class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                        Trigger Wake Word
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-2xl font-semibold mb-4">Last Captured Image</h2>
+            <div hx-sse="connect:/sse" hx-trigger="sse:image">
+                <img id="last-image" src="/taken_image.jpg" alt="Last captured image" class="w-full h-auto rounded-lg">
+                <p class="mt-2 text-sm text-gray-400">Last updated: <span id="last-image-time">Unknown</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        htmx.on("htmx:sseMessage", (event) => {
+            const { type, data } = JSON.parse(event.detail.message);
+            
+            if (type === "status") {
+                updateStatus("eyes", data.eyes);
+                updateStatus("mouth", data.mouth);
+                updateStatus("body", data.body);
+            } else if (type === "image") {
+                updateLastImage(data.timestamp);
+            }
+        });
+
+        function updateStatus(component, status) {
+            const statusElement = document.getElementById(`${component}-status`);
+            statusElement.textContent = status;
+            statusElement.className = `ml-2 px-2 py-1 rounded-full ${status === 'Active' ? 'bg-green-500' : 'bg-red-500'}`;
+        }
+
+        function updateLastImage(timestamp) {
+            const imgElement = document.getElementById('last-image');
+            imgElement.src = `/taken_image.jpg?t=${Date.now()}`;
+            document.getElementById('last-image-time').textContent = timestamp;
+        }
+    </script>
+</body>
+</html>

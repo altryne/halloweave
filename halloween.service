@@ -13,6 +13,8 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
 Restart=on-failure
 RestartSec=10
+StandardOutput=append:/home/altryne/halloween/halloween_app.log
+StandardError=append:/home/altryne/halloween/halloween_app.log
 
 [Install]
 WantedBy=multi-user.target

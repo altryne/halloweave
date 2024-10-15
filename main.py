@@ -8,8 +8,11 @@ from threading import Lock, Thread
 from queue import Queue
 from io import BytesIO
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 import uvicorn
 
 import pyaudio
@@ -53,6 +56,17 @@ from cartesia_client import CartesiaStreamingClient
 # Add this import at the top of the file
 from loguru import logger
 
+from image_handler import image_handler, sse
+
+from datetime import datetime
+
+from sse_manager import SSEManager
+
+from fastapi.responses import FileResponse
+
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
 # Replace the existing logging configuration with loguru configuration
 logger.remove()  # Remove default handler
 logger.add("/home/altryne/halloween/halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
@@ -88,6 +102,15 @@ skeleton = None
 
 app = FastAPI()
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    exc_str = f'{exc}'.replace('\n', ' ').replace('   ', ' ')
+    print(f"Request validation error: {exc_str}")  # Log the error
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body}
+    )
+
 def signal_handler(sig, frame):
     print('You pressed Ctrl+C!')
     # Add any cleanup code here
@@ -99,12 +122,11 @@ signal.signal(signal.SIGTERM, signal_handler)
 @asynccontextmanager
 async def lifespan(app: FastAPI):   
     global camera, porcupine, recorder, skeleton
-    # Replace the existing camera initialization with:
     camera = get_camera()
+    if not camera.start():
+        raise RuntimeError("Could not start camera")
     
     weave.init('altryne-halloween-2024')
-    if not camera.isOpened():
-        raise RuntimeError("Could not open camera")
 
     # Initialize Porcupine
     access_key = os.getenv("PICOVOICE_ACCESS_KEY")
@@ -123,8 +145,9 @@ async def lifespan(app: FastAPI):
     recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
     recorder.start()
 
-    # Initialize skeleton control
+    # Initialize skeleton control once
     skeleton = SkeletonControl()
+    app.state.skeleton = skeleton
 
     # Start frame capture in a separate thread
     capture_thread = Thread(target=capture_frames, daemon=True)
@@ -139,11 +162,13 @@ async def lifespan(app: FastAPI):
     wake_word_thread = Thread(target=wake_word_detector, daemon=True)
     wake_word_thread.start()
 
+    app.state.sse_manager = SSEManager()
+
     try:
         yield
     finally:
         if camera:
-            camera.release()
+            camera.stop()
         if porcupine:
             porcupine.delete()
         if recorder:
@@ -155,18 +180,28 @@ async def lifespan(app: FastAPI):
             skeleton.cleanup()
 
 app = FastAPI(lifespan=lifespan)
-from routes import router as webhook_router
 
-app.include_router(webhook_router)
+# Mount the static files directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Set up Jinja2 templates
+templates = Jinja2Templates(directory="templates")
+
 @app.get("/")
-def read_root():
-    return {"status": "Service is running"}
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    return await sse(request)
+
+from routes import router as webhook_router
+app.include_router(webhook_router)
 
 def capture_frames():
     global camera, frame_queue
-    while True:
-        with camera_lock:
-            frame = camera.capture_image()  # Use capture_frame() instead of read()
+    while camera.isOpened():
+        frame = camera.capture_image()
         if frame is not None:
             if frame_queue.full():
                 frame_queue.get()  # Remove oldest frame if queue is full
@@ -269,9 +304,9 @@ async def process_motion(pil_image):
     return response
 
 async def stream_text_to_speech(text):
-    global audio_playing, skeleton
-    skeleton = SkeletonControl()  # Initialize skeleton instance
-    client = CartesiaStreamingClient(skeleton=skeleton)  # Pass skeleton to client
+    global audio_playing
+    skeleton = app.state.skeleton  # Use the existing skeleton instance
+    client = CartesiaStreamingClient(skeleton=skeleton)
 
     try:
         audio_playing = True
@@ -365,23 +400,6 @@ async def handle_wake_word():
     skeleton.start_body_movement()
     skeleton.eyes_on()
     logger.info("Wake word detected! Taking a picture...")
-    
-    max_retries = 3
-    retry_count = 0
-    while retry_count < max_retries:
-        try:
-            pil_image = camera.capture_image()
-            pil_image.save("taken_image.jpg")
-            logger.info("Image saved as taken_image.jpg")
-            break
-        except Exception as e:
-            retry_count += 1
-            logger.error(f"Error capturing image (attempt {retry_count}/{max_retries}): {e}")
-            if retry_count == max_retries:
-                logger.error("Max retries reached. Failed to capture image.")
-                pil_image = None
-            else:
-                time.sleep(1)  # Wait for 1 second before retrying
 
     audio_file = f"/home/altryne/halloween/sounds/spookybg_{np.random.randint(1, 6)}.wav"
     # Define function to play audio file
@@ -400,8 +418,34 @@ async def handle_wake_word():
     audio_thread = Thread(target=play_sound, args=(audio_file,), daemon=True)
     audio_thread.start()
     
+    max_retries = 3
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            pil_image = camera.capture_image()
+            if pil_image:
+                image_handler.save_image(pil_image)
+            break
+        except Exception as e:
+            retry_count += 1
+            logger.error(f"Error capturing image (attempt {retry_count}/{max_retries}): {e}")
+            if retry_count == max_retries:
+                logger.error("Max retries reached. Failed to capture image.")
+                pil_image = None
+            else:
+                time.sleep(1)  # Wait for 1 second before retrying
+
+    
+    
     
     if pil_image is not None:
+        # Save the image
+        pil_image.save("static/taken_image.jpg")
+        
+        # Notify clients about the new image
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await notify_clients_new_image(timestamp)
+
         logger.info("Image captured successfully. Processing with LLM...")
         if CHAT_MODEL == "gemini":
             response = gemini_chat(pil_image)
@@ -434,7 +478,18 @@ async def handle_wake_word():
 
     return True
 
-    
+async def notify_clients_new_image(timestamp):
+    data = {
+        "type": "image",
+        "data": {
+            "timestamp": timestamp
+        }
+    }
+    await app.state.sse_manager.broadcast(json.dumps(data))
+
+@app.get("/taken_image.jpg")
+async def get_image():
+    return FileResponse("static/taken_image.jpg")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
