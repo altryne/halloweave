@@ -13,7 +13,7 @@ Pillow
 pvporcupine
 pvrecorder
 pygame
-rpi-lgpio
+rpi-lgpio; platform_system == "Linux"
 loguru
 
 jinja2
