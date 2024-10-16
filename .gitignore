@@ -14,8 +14,10 @@ __pycache__
 
 *.jpg
 *.png
-*.jpeg
-*.gif
+!/static/*.png
+!/static/*.jpg
+!/static/*.jpeg
+!/static/*.gif
 *.bmp
 *.tiff
 *.webp
