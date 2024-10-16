@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 import uvicorn
 
 import pyaudio
+import pygame
 from PIL import Image
 import numpy as np
 import cv2
@@ -330,12 +331,10 @@ def wake_word_detector():
             result = porcupine.process(pcm)
             if result >= 0:
                 logger.info("Wake word detected!")
-                skeleton.eyes_on()  # Turn on skeleton eyes
                 if CONVERSATION_MODE == "live":
                     asyncio.run(handle_wake_word_live())
                 else:
                     asyncio.run(handle_wake_word())
-                skeleton.eyes_off()  # Turn off skeleton eyes after conversation
     except KeyboardInterrupt:
         logger.info("Wake word detection stopped.")
     except Exception as e:
@@ -403,7 +402,7 @@ async def handle_wake_word():
 
     audio_file = f"/home/altryne/halloween/sounds/spookybg_{np.random.randint(1, 6)}.wav"
     # Define function to play audio file
-    import pygame
+
     def play_sound(file_path):
         try:
             pygame.mixer.init()
@@ -436,8 +435,6 @@ async def handle_wake_word():
                 time.sleep(1)  # Wait for 1 second before retrying
 
     
-    
-    
     if pil_image is not None:
         # Save the image
         pil_image.save("static/taken_image.jpg")
@@ -464,7 +461,7 @@ async def handle_wake_word():
         skeleton.eyes_off()
     else:
         logger.error("Failed to capture an image.")
-        await stream_text_to_speech("I'm sorry, but I couldn't take a picture at the moment.")
+        await stream_text_to_speech("Hello there young trick or treater! Please take some candy! What a lovely costume you have.")
         skeleton.stop_body_movement()
         skeleton.eyes_off()
     # Fade out the playing pygame music
