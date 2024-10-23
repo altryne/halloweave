@@ -29,7 +29,7 @@ done
 sleep 2
 
 # Change to the Halloween project directory
-cd /home/altryne/halloween
+cd /home/altryne/halloweave
 
 # Activate the virtual environment
 source .venv/bin/activate

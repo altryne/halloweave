@@ -58,14 +58,14 @@ python main.py
 
 To run the Halloween project automatically on your Raspberry Pi, follow these steps:
 
-1. Copy the service file to the systemd directory:
+1. Create a symbolic link for the service file in the systemd directory:
    ```
-   sudo cp halloween.service /etc/systemd/system/
+   sudo ln -s /home/altryne/halloweave/halloween.service /etc/systemd/system/halloween.service
    ```
 
 2. Make sure the bootstrap script is executable:
    ```
-   chmod +x /home/altryne/halloween/halloween_bootstrap.sh
+   chmod +x /home/altryne/halloweave/halloween_bootstrap.sh
    ```
 
 3. Reload the systemd daemon:

@@ -31,6 +31,8 @@ from gemini import gemini_chat
 from openai_client import openai_chat
 from openrouter import openrouter_chat
 
+import tempfile
+import wave
 # Import Porcupine and PvRecorder
 import pvporcupine
 from pvrecorder import PvRecorder
@@ -70,7 +72,7 @@ from fastapi.responses import JSONResponse
 
 # Replace the existing logging configuration with loguru configuration
 logger.remove()  # Remove default handler
-logger.add("/home/altryne/halloween/halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
+logger.add("/home/altryne/halloweave/halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
 logger.add(sys.stdout, colorize=True, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
 
 load_dotenv()
@@ -127,7 +129,7 @@ async def lifespan(app: FastAPI):
     if not camera.start():
         raise RuntimeError("Could not start camera")
     
-    weave.init('altryne-halloween-2024')
+    weave.init('halloweave-dark-skeleton')
 
     # Initialize Porcupine
     access_key = os.getenv("PICOVOICE_ACCESS_KEY")
@@ -313,8 +315,8 @@ async def stream_text_to_speech(text):
         audio_playing = True
         skeleton.start_body_movement()
         skeleton.eyes_on()
-
-        await client.stream_tts(text)
+        audio_bytes = await client.stream_tts(text)
+        
     except Exception as e:
         print(f"Error during text-to-speech: {e}")
     finally:
@@ -322,7 +324,7 @@ async def stream_text_to_speech(text):
         audio_playing = False
         skeleton.stop_body_movement()
         skeleton.eyes_off()
-
+        return get_wave_data_from_audio_bytes(audio_bytes)
 def wake_word_detector():
     global porcupine, recorder, skeleton
     try:
@@ -393,6 +395,7 @@ def process_image_with_gemini(pil_image):
     # You can add logic here to use the Gemini response if needed
 
 # Update the handle_wake_word function for regular mode
+@weave.op
 async def handle_wake_word():
     global camera
     # move the skeleton body and light up eyes
@@ -400,7 +403,10 @@ async def handle_wake_word():
     skeleton.eyes_on()
     logger.info("Wake word detected! Taking a picture...")
 
-    audio_file = f"/home/altryne/halloween/sounds/spookybg_{np.random.randint(1, 6)}.wav"
+    audio_file = f"sounds/spookybg_{np.random.randint(1, 6)}.wav"
+    with open(audio_file, "rb") as f:
+        bg_music_raw = f.read()
+    bg_music_wave = get_wave_data_from_audio_bytes(bg_music_raw)
     # Define function to play audio file
 
     def play_sound(file_path):
@@ -454,14 +460,14 @@ async def handle_wake_word():
             response = "I'm sorry, but I couldn't process the image at the moment."
         
         logger.info(f"Received LLM response: {response}")
-        await stream_text_to_speech(response)
+        greeting = await stream_text_to_speech(response)
         
         # stop the skeleton body movement and turn off the eyes
         skeleton.stop_body_movement()
         skeleton.eyes_off()
     else:
         logger.error("Failed to capture an image.")
-        await stream_text_to_speech("Hello there young trick or treater! Please take some candy! What a lovely costume you have.")
+        greeting = await stream_text_to_speech("Hello there young trick or treater! Please take some candy! What a lovely costume you have.")
         skeleton.stop_body_movement()
         skeleton.eyes_off()
     # Fade out the playing pygame music
@@ -473,7 +479,27 @@ async def handle_wake_word():
     except Exception as e:
         logger.error(f"Error fading out music: {e}")
 
-    return True
+    return {
+        "image": pil_image,
+        "greeting": greeting,
+        "text": response,
+        "bg_music": bg_music_wave
+    }
+
+def get_wave_data_from_audio_bytes(audio_bytes: bytes):
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav:
+        # Write audio data to the temporary WAV file
+        with wave.open(temp_wav.name, 'wb') as wave_file:
+            wave_file.setnchannels(1)  # Mono
+            wave_file.setsampwidth(2)  # 16-bit
+            wave_file.setframerate(44100)  # Assuming 24kHz sample rate
+            wave_file.writeframes(audio_bytes)
+        
+        # Open the temporary WAV file for reading
+        wave_obj = wave.open(temp_wav.name, 'rb')
+    
+    return wave_obj
 
 async def notify_clients_new_image(timestamp):
     data = {

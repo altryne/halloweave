@@ -221,24 +221,24 @@ if __name__ == "__main__":
     print("Starting diagnostics skeleton control test...")
     
     print("Starting audio playback and mouth movement")
-    audio_file = "/home/altryne/halloween/sounds/booting_seq.wav"
+    audio_file = "sounds/booting_seq.wav"
     skeleton.play_audio_and_move_mouth(audio_file)
     
     print("Turning eyes on")
     skeleton.eyes_on()
-    time.sleep(1)
+    time.sleep(5)
     
     print("Turning eyes off")
     skeleton.eyes_off()
-    time.sleep(1)
+    time.sleep(5)
     
     print("Turning eyes on again for 3 seconds")
     skeleton.eyes_on()
-    time.sleep(3)
+    time.sleep(5)
     
     print("Starting body movement for 3 seconds")
     skeleton.start_body_movement()
-    time.sleep(3)
+    time.sleep(5)
     skeleton.stop_body_movement()
     
     print("Waiting for audio to finish...")

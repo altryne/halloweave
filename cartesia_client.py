@@ -33,6 +33,7 @@ class CartesiaStreamingClient:
         pygame.mixer.init()
 
     async def stream_tts(self, text: str, use_sse: bool = False):
+        raw_audio_data = b""
         try:
             output_format = {
                 "container": "raw",
@@ -42,14 +43,15 @@ class CartesiaStreamingClient:
 
             if use_sse:
                 async for chunk in self._stream_sse(text, output_format):
-                    await self._handle_chunk(chunk)
+                    raw_audio_data += await self._handle_chunk(chunk)
             else:
                 async for chunk in self._stream_websocket(text, output_format):
-                    await self._handle_chunk(chunk)
+                    raw_audio_data += await self._handle_chunk(chunk)
         finally:
             # Ensure the mouth is closed after streaming is complete
             if self.skeleton:
                 self.skeleton.stop_mouth_movement()
+        return raw_audio_data
 
     async def _stream_sse(self, text: str, output_format: Dict) -> AsyncGenerator[Dict[str, Union[bytes, float]], None]:
         async with self.client.tts.stream(
@@ -117,7 +119,7 @@ class CartesiaStreamingClient:
 
     async def _handle_chunk(self, chunk: Dict[str, Union[bytes, float]]):
         audio_data = np.frombuffer(chunk['audio'], dtype=np.int16)
-        volume_multiplier = 2
+        volume_multiplier = 1.2
         audio_data = (audio_data * volume_multiplier).astype(np.int16)
 
         # Print audio statistics
@@ -126,16 +128,18 @@ class CartesiaStreamingClient:
         print(f"Audio chunk - Max amplitude: {max_amplitude}, Mean amplitude: {mean_amplitude}")
 
         # Play audio
-        self.audio_stream.write(audio_data.tobytes())
+        audio_data_bytes = audio_data.tobytes()
+        self.audio_stream.write(audio_data_bytes)
 
         # Move skeleton mouth if instance is provided
         if self.skeleton:
             # Use run_in_executor to run the synchronous move_mouth method
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(self.executor, self.skeleton.move_mouth, audio_data.tobytes())
+            await loop.run_in_executor(self.executor, self.skeleton.move_mouth, audio_data_bytes)
 
         print(f"Timestamp: {chunk['timestamp']:.2f}s")
-
+        return audio_data_bytes
+    
     async def close(self):
         if self.audio_stream:
             self.audio_stream.stop_stream()
@@ -146,6 +150,8 @@ class CartesiaStreamingClient:
         self.executor.shutdown()
         if self.client:
             await self.client.close()
+
+
 
 async def test_streaming(use_sse: bool = False):
     skeleton = SkeletonControl()
