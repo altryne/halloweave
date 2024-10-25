@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-opencv-python
+# opencv-python
 pyaudio
 google-generativeai
 openai
