@@ -123,7 +123,7 @@ class CartesiaStreamingClient:
         # Print audio statistics
         max_amplitude = np.max(np.abs(audio_data))
         mean_amplitude = np.mean(np.abs(audio_data))
-        print(f"Audio chunk - Max amplitude: {max_amplitude}, Mean amplitude: {mean_amplitude}")
+        # print(f"Audio chunk - Max amplitude: {max_amplitude}, Mean amplitude: {mean_amplitude}")
 
         # Play audio
         self.audio_stream.write(audio_data.tobytes())
@@ -155,7 +155,7 @@ async def test_streaming(use_sse: bool = False):
         skeleton.start_body_movement()
         skeleton.eyes_on()
 
-        text = "Hello, this is a test. How does it sound? I'm just a friendly neighborhood sekelton speaking to you in a calm and frightening voice"
+        text = "BOO! just kidding, you're doing great Jack! awesome demo!"
         await client.stream_tts(text, use_sse)
     finally:
         await client.close()
