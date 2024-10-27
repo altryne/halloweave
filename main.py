@@ -54,7 +54,6 @@ import sys
 
 from concurrent.futures import ThreadPoolExecutor
 
-from cartesia_client import CartesiaStreamingClient
 
 # Add this import at the top of the file
 from loguru import logger
@@ -306,10 +305,25 @@ async def process_motion(pil_image):
     await stream_text_to_speech(response)
     return response
 
+# Add this near the top of the file with other configuration variables
+TTS_ENGINE = "elevenlabs"  # Options: "cartesia" or "elevenlabs"
+
+# Update the stream_text_to_speech function
 async def stream_text_to_speech(text):
     global audio_playing
     skeleton = app.state.skeleton  # Use the existing skeleton instance
-    client = CartesiaStreamingClient(skeleton=skeleton)
+    
+    # Import the appropriate client based on TTS_ENGINE
+    if TTS_ENGINE == "cartesia":
+        from cartesia_client import CartesiaStreamingClient
+        ClientClass = CartesiaStreamingClient
+    elif TTS_ENGINE == "elevenlabs":
+        from elevenlabs_client import ElevenLabsStreamingClient
+        ClientClass = ElevenLabsStreamingClient
+    else:
+        raise ValueError(f"Unknown TTS engine: {TTS_ENGINE}")
+    
+    client = ClientClass(skeleton=skeleton)
 
     try:
         audio_playing = True

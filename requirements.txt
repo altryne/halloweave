@@ -23,3 +23,4 @@ sse_starlette
 pydub
 websockets
 llama-index
+elevenlabs

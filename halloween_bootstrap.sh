@@ -11,7 +11,7 @@ pulseaudio --start
 
 # Connect to the Bluetooth device
 for attempt in {1..3}; do
-    if bluetoothctl connect D6:F7:3D:E8:F9:68; then
+    if bluetoothctl connect 7A:41:D4:A4:17:26; then
         echo "Bluetooth device connected successfully."
         break
     else
