@@ -8,6 +8,7 @@ requests
 python-dotenv
 cartesia
 weave
+git+https://github.com/wandb/weave.git@master 
 Pillow
 # RPi.GPIO
 pvporcupine

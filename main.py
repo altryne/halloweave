@@ -69,7 +69,7 @@ from fastapi.responses import JSONResponse
 
 # Replace the existing logging configuration with loguru configuration
 logger.remove()  # Remove default handler
-logger.add("/home/altryne/halloween/halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
+logger.add("halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
 logger.add(sys.stdout, colorize=True, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
 
 load_dotenv()
@@ -414,7 +414,7 @@ async def handle_wake_word():
     skeleton.eyes_on()
     logger.info("Wake word detected! Taking a picture...")
 
-    audio_file = f"/home/altryne/halloween/sounds/spookybg_{np.random.randint(1, 6)}.wav"
+    audio_file = f"sounds/spookybg_{np.random.randint(1, 6)}.wav"
     # Define function to play audio file
 
     def play_sound(file_path):
