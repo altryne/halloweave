@@ -71,7 +71,7 @@ from fastapi.responses import JSONResponse
 
 # Replace the existing logging configuration with loguru configuration
 logger.remove()  # Remove default handler
-logger.add("/home/altryne/halloweave/halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
+logger.add("halloween_app.log", rotation="1 day", retention="7 days", level="DEBUG")
 logger.add(sys.stdout, colorize=True, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
 
 load_dotenv()
