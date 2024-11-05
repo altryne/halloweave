@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-# opencv-python
+opencv-python
 pyaudio
 google-generativeai
 openai
@@ -8,7 +8,6 @@ requests
 python-dotenv
 cartesia
 weave
-git+https://github.com/wandb/weave.git@master 
 Pillow
 # RPi.GPIO
 pvporcupine
